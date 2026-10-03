@@ -72,11 +72,15 @@ class Hiyuki(BaseChar):
 
             if self.is_mouse_forte_full():
                 self.task.click(key="right")
-                self.heavy_click_forte(check_fun=self.is_mouse_forte_full)
-                self.task.wait_until(self.liberation_available, post_action=self.click_with_interval, time_out=self.FIELD_TIME_OUT)
-                if self.click_liberation():
-                    self.logger.debug('hiyuki perform lib1')
-                    return
+                # Only wait for lib1 if Frost Splinter actually fired (Dedication consumed); otherwise retry the
+                # heavy next loop instead of idling up to FIELD_TIME_OUT. The wait is bounded by the field time left.
+                if self.heavy_click_forte(check_fun=self.is_mouse_forte_full):
+                    remaining = timeout - self.time_elapsed_accounting_for_freeze(self.last_perform)
+                    self.task.wait_until(self.liberation_available, post_action=self.click_with_interval,
+                                         time_out=max(remaining, 1.0))
+                    if self.click_liberation():
+                        self.logger.debug('hiyuki perform lib1')
+                        return
             else:
                 self.click(interval=0.1)
             self.sleep(0.05)
@@ -93,11 +97,21 @@ class Hiyuki(BaseChar):
             self.f_break()
             self.click_echo(time_out=0)
             
-            # 优化图像识别日志和复用
-            lib_heavy_avail = self.lib_heavy_available()
-            self.logger.debug(f"hiyuki find mouse_forte: {lib_heavy_avail}")
-
             is_timeout = self.time_elapsed_accounting_for_freeze(start) >= timeout - 0.5
+
+            # Heavy Attack - Bitterfrost: Foreclaimed Self goes first (even near timeout): it grants the
+            # Snowforged Blade that Foreclaiming: Blade Liberation consumes for extra DMG.
+            if self.cast_bitterfrost():
+                self.lib2_count += 1
+                self.logger.debug(f"hiyuki heavy count: {self.lib2_count}")
+                if self.task.wait_until(self.liberation_available, post_action=self.click, time_out=0.5):
+                    if self.wait_locked(self.WAIT_LOCK_TIME_OUT) and self.hold_liberation():
+                        self.logger.debug('hiyuki perform lib2 (after heavy)')
+                        self.lib2_count = 0
+                        return True
+                self.sleep(0.1)
+                continue
+
             if self.lib_permission and self.liberation_available() and (self.lib2_count >= self.LIB2_KENDO_COUNT or is_timeout):
                 if self.hold_liberation():
                     self.logger.info(f'hiyuki perform lib2 after heavy (count: {self.lib2_count}, timeout: {is_timeout})')
@@ -110,19 +124,6 @@ class Hiyuki(BaseChar):
                 if is_timeout:
                     break
                 self.continues_normal_attack(self.POST_RES_NORMAL_ATTACK_TIME)
-            elif self.lib_heavy_available():
-                if is_timeout:
-                    break
-                if self.wait_locked(self.WAIT_LOCK_TIME_OUT):
-                    self.heavy_click_forte(check_fun=self.lib_heavy_available)
-                if self.task.wait_until(self.liberation_available, post_action=self.click, time_out=0.5):
-                    if self.wait_locked(self.WAIT_LOCK_TIME_OUT) and self.hold_liberation():
-                        self.logger.debug('hiyuki perform lib2 (after heavy)')
-                        self.lib2_count = 0
-                        return True
-                self.lib2_count += 1
-                self.sleep(0.1)
-                self.logger.debug(f"hiyuki heavy  count: {self.lib2_count}")
             elif bool(self.task.find_one('hiyuki_left', threshold=0.5)):
                 self.task.wait_until(lambda: not bool(self.task.find_one('hiyuki_left', threshold=0.5)),
                                      post_action=self.click, time_out=3.0)
@@ -148,6 +149,15 @@ class Hiyuki(BaseChar):
 
     def lib_heavy_available(self):
         return bool(self.task.find_one('hiyuki_lib_forte', threshold=0.7))
+
+    def cast_bitterfrost(self):
+        """Cast Heavy Attack - Bitterfrost: Foreclaimed Self if ready; True only if it actually fired."""
+        if not self.lib_heavy_available():
+            return False
+        if not self.wait_locked(self.WAIT_LOCK_TIME_OUT):
+            return False
+        self.heavy_click_forte(check_fun=self.lib_heavy_available)
+        return not self.lib_heavy_available()
 
     def wait_locked(self, time_out):
         """等到重新锁定敌人(has_long_action2 为真)再返回 True; 等满 time_out 仍未锁上返回 False。

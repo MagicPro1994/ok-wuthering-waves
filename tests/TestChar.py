@@ -409,6 +409,161 @@ class TestChar(TaskTestCase):
 
         self.assertEqual(suisui.last_forte3_switch, -1)
 
+    def _make_suisui(self, e1_visible=False):
+        class Task:
+            chars = []
+
+            def find_one(self, name, **kwargs):
+                return None
+
+            def next_frame(self):
+                pass
+
+        task = Task()
+        suisui = Suisui(task, 0, char_type=CharType.HEALER)
+        suisui.time_elapsed_accounting_for_freeze = lambda start: time.time() - start
+        suisui.click = lambda *args, **kwargs: None
+        suisui.cycle_sleep = lambda *args, **kwargs: None
+        suisui.sleep = lambda *args, **kwargs: None
+        suisui.click_liberation = lambda **kwargs: False
+        suisui.forte2_available = lambda: False
+        return suisui
+
+    def test_suisui_does_not_leave_before_concerto_is_full(self):
+        suisui = self._make_suisui()
+        con_checks = iter([False, False, False, True])
+        suisui.forte3_available = lambda: True
+        suisui.is_con_full = lambda: next(con_checks)
+        suisui.try_e = lambda: self.fail('E quick path must not switch out')
+        suisui.switch_next_char = lambda: self.fail('rotation must not switch itself')
+
+        suisui.perform_forte3_rotation()
+
+        self.assertEqual(next(con_checks, 'consumed'), 'consumed')
+
+    def test_suisui_keeps_building_concerto_after_forte3_detection_times_out(self):
+        suisui = self._make_suisui()
+        suisui.FORTE_TIMEOUT = 0
+        con_checks = iter([False, False, True])
+        suisui.forte3_available = lambda: False
+        suisui.is_con_full = lambda: next(con_checks)
+
+        suisui.perform_forte3_rotation()
+
+        self.assertEqual(next(con_checks, 'consumed'), 'consumed')
+
+    def test_suisui_hard_timeout_still_releases_the_field(self):
+        suisui = self._make_suisui()
+        suisui.CONCERTO_HARD_TIMEOUT = 0
+        suisui.forte3_available = lambda: True
+        suisui.is_con_full = lambda: False
+
+        suisui.perform_forte3_rotation()
+
+    def _make_hiyuki(self, heavy_ready, lib_available):
+        from src.char.Hiyuki import Hiyuki
+
+        class Task:
+            use_liberation = True
+
+            def wait_until(self, condition, **kwargs):
+                return condition()
+
+            def find_one(self, *args, **kwargs):
+                return None
+
+            def click(self, *args, **kwargs):
+                pass
+
+        hiyuki = Hiyuki(Task(), 0, char_type=CharType.MAIN_DPS)
+        events = []
+        clock = {'t': 0}
+        hiyuki.time_elapsed_accounting_for_freeze = lambda start: clock['t']
+        hiyuki.has_long_action2 = lambda: True
+        hiyuki.f_break = lambda: None
+        hiyuki.click_echo = lambda **kwargs: None
+        hiyuki.click_resonance = lambda **kwargs: None
+        hiyuki.click = lambda *args, **kwargs: None
+        hiyuki.sleep = lambda *args, **kwargs: None
+        hiyuki.lib_heavy_available = heavy_ready
+        hiyuki.liberation_available = lib_available
+        hiyuki.hold_liberation = lambda: events.append('lib2') or True
+        return hiyuki, events, clock
+
+    def test_hiyuki_casts_bitterfrost_before_blade_liberation_even_at_timeout(self):
+        state = {'heavy': True}
+        hiyuki, events, clock = self._make_hiyuki(lambda: state['heavy'], lambda: True)
+        clock['t'] = hiyuki.FIELD_TIME_OUT - 0.2  # inside the "is_timeout" window
+
+        def heavy(check_fun=None):
+            events.append('heavy')
+            state['heavy'] = False
+
+        hiyuki.heavy_click_forte = heavy
+
+        self.assertTrue(hiyuki.perform_lib())
+        self.assertEqual(['heavy', 'lib2'], events)
+
+    def test_hiyuki_does_not_count_bitterfrost_that_did_not_fire(self):
+        hiyuki, events, _ = self._make_hiyuki(lambda: True, lambda: False)
+        hiyuki.heavy_click_forte = lambda check_fun=None: events.append('heavy')
+        calls = iter([True, True, False])  # loop check, wait_locked, loop check
+        hiyuki.has_long_action2 = lambda: next(calls, False)
+
+        hiyuki.perform_lib()
+
+        self.assertEqual(['heavy'], events)
+        self.assertEqual(0, hiyuki.lib2_count)
+
+    def _make_hiyuki_standard(self, heavy_result):
+        from src.char.Hiyuki import Hiyuki
+
+        waits = []
+
+        class Task:
+            def click(self, *args, **kwargs):
+                pass
+
+            def wait_until(self, condition, **kwargs):
+                waits.append(kwargs['time_out'])
+                return True
+
+        hiyuki = Hiyuki(Task(), 0, char_type=CharType.MAIN_DPS)
+        loops = iter([True, True, False])
+        hiyuki.last_perform = 0
+        hiyuki.has_long_action = lambda: next(loops)
+        hiyuki.time_elapsed_accounting_for_freeze = lambda start: 10
+        hiyuki.click_echo = lambda **kwargs: None
+        hiyuki.click_resonance = lambda **kwargs: None
+        hiyuki.click = lambda *args, **kwargs: None
+        hiyuki.sleep = lambda *args, **kwargs: None
+        hiyuki.liberation_available = lambda: False
+        hiyuki.is_mouse_forte_full = lambda: True
+        hiyuki.heavy_click_forte = lambda check_fun=None: heavy_result
+        hiyuki.click_liberation = lambda **kwargs: True
+        return hiyuki, waits
+
+    def test_hiyuki_frost_splinter_waits_for_lib1_only_within_remaining_field_time(self):
+        hiyuki, waits = self._make_hiyuki_standard(heavy_result=True)
+
+        hiyuki.perform_standard()
+
+        self.assertEqual([hiyuki.FIELD_TIME_OUT - 10], waits)
+
+    def test_hiyuki_frost_splinter_that_did_not_fire_does_not_wait_for_lib1(self):
+        hiyuki, waits = self._make_hiyuki_standard(heavy_result=False)
+
+        hiyuki.perform_standard()
+
+        self.assertEqual([], waits)
+
+    def test_hiyuki_still_casts_liberation_at_timeout_when_no_bitterfrost(self):
+        hiyuki, events, clock = self._make_hiyuki(lambda: False, lambda: True)
+        clock['t'] = hiyuki.FIELD_TIME_OUT - 0.2
+
+        self.assertTrue(hiyuki.perform_lib())
+        self.assertEqual(['lib2'], events)
+
     def test_click_liberation_send_click_false_disables_wait_click(self):
         class Task:
             use_liberation = True

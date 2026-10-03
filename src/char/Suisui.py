@@ -7,7 +7,7 @@ from src.char.BaseChar import BaseChar, SwitchPriority
 class Suisui(BaseChar):
     ATTACK_INTERVAL = 0.1
     FORTE_TIMEOUT = 26.0
-    CONCERTO_TIMEOUT = 12.0
+    CONCERTO_HARD_TIMEOUT = 30.0
     FORTE3_SWITCH_LOCKOUT = 16.0
     MAIN_DPS_FORTE3_SWITCH_LOCKOUT = 32
 
@@ -24,51 +24,56 @@ class Suisui(BaseChar):
     def do_perform(self):
         if not self.should_heavy:
             self.should_heavy = self.has_intro
-        if self.perform_forte3_rotation():
-            return
+        self.perform_forte3_rotation()
         self.switch_next_char()
 
     def perform_forte3_rotation(self):
+        """Build forte3, cast liberation, then keep attacking until concerto is full.
+
+        Only returns early (letting the caller switch) once concerto is full, or after
+        CONCERTO_HARD_TIMEOUT if the concerto detection never reports full.
+        """
         start = time.time()
         if self.should_heavy:
             if self.has_intro:
                 self.heavy_attack(1.5)
             self.click_resonance()
             self.should_heavy = False
+        forte3_ready = False
         while self.time_elapsed_accounting_for_freeze(start) < self.FORTE_TIMEOUT:
             if self.forte3_available():
                 self.logger.debug('forte3 available')
+                forte3_ready = True
                 break
-            elif self.forte2_available() or self.forte3_available():
+            elif self.forte2_available():
                 self.logger.debug('forte2 available')
                 for i in range(7):
                     if self.forte3_available():
                         break
                     self.click(after_sleep=0.1)
+                forte3_ready = True
                 break
             self.cycle_start()
             if not self.has_intro:
-                if self.try_e():
-                    self.switch_next_char()
-                    return True
+                self.try_e()
             self.click()
             self.cycle_sleep(self.ATTACK_INTERVAL)
         else:
-            self.logger.warning('Suisui forte3 detection timed out')
-            return
+            self.logger.warning('Suisui forte3 detection timed out, keep building concerto')
 
         liberation_clicked = False
-        start = time.time()
-        while self.time_elapsed_accounting_for_freeze(start) < self.CONCERTO_TIMEOUT:
+        concerto_start = time.time()
+        while not (self.is_con_full() and (not forte3_ready or self.forte3_available())):
+            waited = self.time_elapsed_accounting_for_freeze(concerto_start)
+            if waited >= self.CONCERTO_HARD_TIMEOUT:
+                self.logger.warning('Suisui concerto fill timed out')
+                return
             if not liberation_clicked:
                 liberation_clicked = self.click_liberation(wait_if_cd_ready=0)
                 if liberation_clicked:
                     self.task.next_frame()
                     continue
-            if self.is_con_full() and self.forte3_available():
-                return
             self.click(after_sleep=0.1)
-        self.logger.warning('Suisui concerto fill timed out')
 
     def try_e(self):
         if self.task.find_one(Labels.suisui_e1):
