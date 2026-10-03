@@ -8,6 +8,11 @@ class Jiyan(BaseChar):
             self.logger.debug('jiyan wait intro')
             self.continues_normal_attack(duration=2.0)
             # fly check not work for jiyan
+        elif self.liberation_available() and not self.is_forte_full():
+            # forte full = 60 Resolve (cap); Finale needs 30, which can't be detected, so build Resolve for up to 2s
+            start = time.time()
+            while not self.is_forte_full() and time.time() - start < 2.0:
+                self.normal_attack()
         if self.click_liberation():
             start = time.time()
             while time.time() - start < 12:
@@ -26,7 +31,8 @@ class Jiyan(BaseChar):
                 i = 0
             self.normal_attack()
             i += 1
-        if not self.is_forte_full() and self.resonance_available():
+        if self.resonance_available() and (not self.is_forte_full() or not self.liberation_available()
+                                           or not self.task.use_liberation):
             self.click_resonance(post_sleep=1.0)
         if self.echo_available():
             self.click_echo()

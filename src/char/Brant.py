@@ -35,7 +35,7 @@ class Brant(BaseChar):
         if self.is_forte_full() and self.resonance_available():
             self.resonance_forte_full()
             self.perform_anchor = time.time()
-            self.in_liberaction = 0
+            self.last_liberation = -1
             return self.switch_next_char()
         if not self.still_in_liberation() and self.echo_available():
             self.click_echo()

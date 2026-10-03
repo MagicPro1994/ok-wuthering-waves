@@ -64,7 +64,7 @@ _char_dict_raw = {
     Labels.char_shorekeeper: {'cls': ShoreKeeper, 'char_type': CharType.HEALER,
                               'ring_index': Elements.SPECTRO},
     Labels.char_suisui: {'cls': Suisui, 'char_type': CharType.HEALER},
-    Labels.char_taoqi: {'cls': Taoqi, 'char_type': CharType.HEALER,
+    Labels.char_taoqi: {'cls': Taoqi, 'char_type': CharType.HEALER, 'buff_time': 14,
                         'ring_index': Elements.HAVOC},
     (Labels.char_rover, Labels.char_rover_male): {'cls': Rover, 'char_type': CharType.MAIN_DPS},
     Labels.char_encore: {'cls': Encore, 'char_type': CharType.MAIN_DPS,

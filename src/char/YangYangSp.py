@@ -29,7 +29,7 @@ class YangYangSp(BaseChar):
         echo_used = False
         try:
             while self.time_elapsed_accounting_for_freeze(start) < duration:
-                if self.liberation_available():
+                if self.task.use_liberation and self.liberation_available():
                     self.logger.debug('liberation_available')
                     if not self.click_liberation(send_click=False, wait_if_cd_ready=0):
                         pass

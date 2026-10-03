@@ -38,10 +38,13 @@ class Iuno(BaseChar):
         while self.time_elapsed_accounting_for_freeze(start) < time_out:
             cycle_start = time.time()
             heavy_success = False
+            heavy_start = time.time()
+            # 技能内置冷却25s; 内层重试限时3s防止死循环
             while self.time_elapsed_accounting_for_freeze(
-                    self.last_heavy) > 20 and self.task.find_feature("iuno_heavy",
-                                                                     box="box_extra_action",
-                                                                     threshold=0.6):
+                    self.last_heavy) > 25 and self.time_elapsed_accounting_for_freeze(
+                    heavy_start) < 3 and self.task.find_feature("iuno_heavy",
+                                                                box="box_extra_action",
+                                                                threshold=0.6):
                 # 特殊重击可用
                 self.sleep(0.05)
                 self.heavy_attack()

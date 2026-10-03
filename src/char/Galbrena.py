@@ -29,6 +29,8 @@ class Galbrena(BaseChar):
             while self.check_res() and time.time() - start < 10:
                 if self.flying():
                     self.shorekeeper_auto_dodge()
+                if self.is_forte_full():  # Sinflame full: cast Ascent of Malice to enter Demon Hypostasis
+                    self.click_resonance()
                 self.click(after_sleep=0.1)
                 self.check_combat()
             return self.switch_next_char()

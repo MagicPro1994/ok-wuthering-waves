@@ -35,9 +35,8 @@ class Carlotta(BaseChar):
             self.logger.debug('has_intro wait click 1.3 sec')
             self.bullet = 1
             self.continues_normal_attack(1.3)
-        if self.heavy_click_forte(check_fun=self.is_mouse_forte_full):
-            return self.switch_next_char()
         if self.liberation_available() and not self.need_fast_perform():
+            # cast liberation before the Imminent Oblivion heavy so Final Bow (Substance full) +80% applies
             auto_dodge = -1
             while self.liberation_available():
                 if auto_dodge != -1 and time.time() - auto_dodge > 0.5 and self.flying():
@@ -47,6 +46,8 @@ class Carlotta(BaseChar):
                 self.check_combat()
             self.click_echo()
             self.switch_lock = time.time()
+            return self.switch_next_char()
+        if self.heavy_click_forte(check_fun=self.is_mouse_forte_full):
             return self.switch_next_char()
         if self.resonance_available():
             if self.bullet == 0:
@@ -251,8 +252,8 @@ class Carlotta(BaseChar):
             self.liberation_ready = True
             self.forte = 0
         self.check_combat()
-        self._liberation_available == False
-        self._resonance_available == False
+        self._liberation_available = False
+        self._resonance_available = False
         click = False
         liber = False
         if self.liberation_ready:

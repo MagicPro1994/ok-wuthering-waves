@@ -187,8 +187,9 @@ class Ciaccona(BaseChar):
         
     def need_fast_perform(self):
         from src.char.Cartethyia import Cartethyia
-        if self.task.has_char(Cartethyia) and hasattr(Cartethyia, 'is_cartethyia'):
-            return Cartethyia.is_cartethyia
+        cartethyia = self.task.has_char(Cartethyia)
+        if cartethyia is not None:
+            return cartethyia.is_cartethyia
         return False
 
 

@@ -24,7 +24,8 @@ class Suisui(BaseChar):
     def do_perform(self):
         if not self.should_heavy:
             self.should_heavy = self.has_intro
-        self.perform_forte3_rotation()
+        if self.perform_forte3_rotation():
+            return
         self.switch_next_char()
 
     def perform_forte3_rotation(self):
@@ -48,7 +49,8 @@ class Suisui(BaseChar):
             self.cycle_start()
             if not self.has_intro:
                 if self.try_e():
-                    return self.switch_next_char()
+                    self.switch_next_char()
+                    return True
             self.click()
             self.cycle_sleep(self.ATTACK_INTERVAL)
         else:

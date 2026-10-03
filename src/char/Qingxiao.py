@@ -41,7 +41,11 @@ class Qingxiao(BaseChar):
                     self.click()
                 self.cycle_sleep()
             if not broke_on_h2:
-                self.handle_heavy()
+                if self.handle_heavy():
+                    self.f_break()
+                # 18s 内没等到 h2 时兜底放大招, 避免整轮爆发丢失 R
+                if self.liberation_available() and self.click_liberation():
+                    broke_on_h2 = True
 
         if broke_on_h2 and self.task is not None:
             # R 未放出时(按钮没亮),强化重击落地动画还没结束就切会撞 not_in_team ERROR;等切人判定稳定再切

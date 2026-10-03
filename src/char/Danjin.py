@@ -12,7 +12,9 @@ class Danjin(BaseChar):
             self.sleep(1.2)
             self.click_echo(time_out=2)
             return self.switch_next_char()
-        if self.is_forte_full() and self.has_intro:
+        if self.is_forte_full():
+            if not self.has_intro:
+                self.wait_down()
             duration = 0.8
             if self.task.debug:
                 self.task.screenshot("danjin_heavy")

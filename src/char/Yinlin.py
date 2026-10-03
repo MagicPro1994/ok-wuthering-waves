@@ -16,5 +16,6 @@ class Yinlin(BaseChar):
         elif self.echo_available():
             self.click_echo()
         else:
-            self.heavy_attack()
+            # 重击不产生审判点数/罪人印记，改用普攻
+            self.continues_normal_attack(0.8)
         self.switch_next_char()

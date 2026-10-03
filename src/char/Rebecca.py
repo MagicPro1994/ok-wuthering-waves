@@ -81,6 +81,9 @@ class Rebecca(BaseChar):
             self.heavy_attack(0.5)
 
     def perform_hmg_mode(self):
+        # 大招未就绪（能量不足）：不进入 HMG，也不启动让位窗口，下次入场仍执行完整连招
+        if not self.liberation_available():
+            return
         enter_start = time.time()
         while time.time() - enter_start < self.LIB_ENTER_DURATION:
             self.send_liberation_key()
