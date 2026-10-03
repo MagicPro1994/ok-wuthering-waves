@@ -25,3 +25,7 @@ docs = [
 web-test = [
     "ok-script[web]==2.0.8",
 ]
+
+[tool.uv]
+# App, not a library: skip building/installing the project itself (setuptools+cython).
+package = false

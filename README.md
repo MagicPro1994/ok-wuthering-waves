@@ -103,6 +103,15 @@ python main.py
 python main_debug.py
 ```
 
+使用 [uv](https://docs.astral.sh/uv/)（依赖由 `pyproject.toml` / `uv.lock` 管理）：
+
+```bash
+uv sync                      # 创建 .venv 并安装依赖（加 --extra dev 安装测试依赖）
+uv run main.py               # 运行 Release 版本
+uv run main_debug.py         # 运行 Debug 版本
+uv run pytest                # 运行测试（需 --extra dev）
+```
+
 ### 命令行参数
 
 您可以通过命令行参数实现自动化启动。
