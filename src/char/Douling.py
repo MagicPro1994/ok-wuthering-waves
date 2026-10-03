@@ -1,5 +1,6 @@
 import time
 
+from src.Labels import Labels
 from src.char.BaseChar import BaseChar, SwitchPriority
 
 
@@ -43,7 +44,11 @@ class Douling(BaseChar):
         else:
             self.wait_down()
         self.check_combat()
-        self._heavy_attack_hold(2.5)
+        # holding heavy with < 2 Trigrams fails the divination and costs 20% HP
+        if self.heavy_available():
+            self._heavy_attack_hold(2.5)
+        else:
+            self.logger.debug('Douling heavy skipped: no Trigram combo highlighted')
         self.click_echo(time_out=0)
         self.click_liberation()
         self._segment = 1
@@ -65,6 +70,9 @@ class Douling(BaseChar):
             self.click()
             self.cycle_sleep()
 
+    def heavy_available(self):
+        return bool(self.task.find_one(Labels.douling_heavy, threshold=0.7))
+
     def _heavy_attack_hold(self, duration):
         retries = 3
         for _ in range(retries):
@@ -75,6 +83,8 @@ class Douling(BaseChar):
             while time.time() - start < duration:
                 if self.flying():
                     interrupted = True
+                    break
+                if not self.heavy_available():
                     break
                 self.sleep(0.1)
             self.task.mouse_up()
