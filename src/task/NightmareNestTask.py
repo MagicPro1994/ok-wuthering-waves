@@ -10,8 +10,9 @@ from src.task.WWOneTimeTask import WWOneTimeTask
 logger = Logger.get_logger(__name__)
 TRAVEL_FEATURES = ['fast_travel_custom', 'gray_teleport', 'remove_custom']
 CONFIRM_FEATURES = ['confirm_btn_hcenter_vcenter', 'confirm_btn_highlight_hcenter_vcenter']
-# 任务追踪栏(左上)在聚落清完后会显示 "Tacet Discord Nest Cleared"
-NEST_CLEARED_RE = re.compile(r'Cleared|已清除|已清理|已完成', re.IGNORECASE)
+# 任务追踪栏(左上)在聚落清完后会显示 "Tacet Discord Nest Cleared",
+# 梦魇聚落(Nightmare Purification)则显示 "This Nightmare Nest has been purified"
+NEST_CLEARED_RE = re.compile(r'Cleared|purified|已清除|已清理|已完成|已净化|已淨化', re.IGNORECASE)
 
 
 @dataclass

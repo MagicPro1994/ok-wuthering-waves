@@ -128,6 +128,13 @@ class TestNightmareNestTask(unittest.TestCase):
 
         self.assertTrue(task.is_nest_cleared())
 
+    def test_nest_cleared_regex_covers_nightmare_purification_text(self):
+        from src.task.NightmareNestTask import NEST_CLEARED_RE
+
+        self.assertTrue(NEST_CLEARED_RE.search('This Nightmare Nest has been purified'))
+        self.assertTrue(NEST_CLEARED_RE.search('Tacet Discord Nest Cleared'))
+        self.assertFalse(NEST_CLEARED_RE.search('Tacet Discord Nest 0/36'))
+
     def test_capture_mode_does_not_check_combat_after_pickup(self):
         task = NightmareNestTask.__new__(NightmareNestTask)
         task._capture_mode = True
