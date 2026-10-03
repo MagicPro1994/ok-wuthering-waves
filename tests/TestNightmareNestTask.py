@@ -69,11 +69,64 @@ class TestNightmareNestTask(unittest.TestCase):
                 task.log_info = lambda *args, **kwargs: None
                 task.send_key = lambda *args, **kwargs: None
                 task.esc_world_confirm = lambda *args, **kwargs: None
+                task._wait_nest_cleared = lambda: True
 
                 task.combat_nest(FakeBox('nest'))
 
                 self.assertEqual([10, 1], [call['wait_combat_time'] for call in combat_calls])
                 self.assertEqual(2, len(pickup_calls))
+
+    def test_open_world_nest_waits_for_cleared_before_searching_echo(self):
+        task = NightmareNestTask.__new__(NightmareNestTask)
+        task._capture_mode = False
+        task._capture_success = False
+        events = []
+
+        task.click = lambda *args, **kwargs: None
+        task.wait_feature = lambda *args, **kwargs: FakeBox('fast_travel_custom')
+        task.wait_in_team_and_world = lambda *args, **kwargs: True
+        task._travel_to_nest_or_skip = lambda nest: True
+        task.sleep = lambda *args, **kwargs: None
+        task.find_f_with_text = lambda: False
+        task.run_until = lambda *args, **kwargs: None
+        task.combat_once = lambda **kwargs: events.append('combat') or True
+        task._wait_nest_cleared = lambda: events.append('wait_cleared') or True
+        task.walk_find_echo = lambda **kwargs: events.append('find_echo') or True
+        task.wait_combat = lambda **kwargs: False
+        task.log_info = lambda *args, **kwargs: None
+
+        task.combat_nest(FakeBox('nest'))
+
+        self.assertEqual(['combat', 'wait_cleared', 'find_echo'], events)
+
+    def test_wait_nest_cleared_keeps_fighting_until_tracker_shows_cleared(self):
+        task = NightmareNestTask.__new__(NightmareNestTask)
+        events = []
+        cleared = iter([False, False, True])
+        waves = iter([True, False])
+
+        task.is_nest_cleared = lambda: next(cleared)
+        task.wait_combat = lambda **kwargs: next(waves)
+        task.combat_once = lambda **kwargs: events.append('combat')
+        task.log_info = lambda *args, **kwargs: None
+
+        self.assertTrue(task._wait_nest_cleared())
+        self.assertEqual(['combat'], events)
+
+    def test_wait_nest_cleared_gives_up_after_time_out(self):
+        task = NightmareNestTask.__new__(NightmareNestTask)
+        task.nest_cleared_time_out = 0
+        task.is_nest_cleared = lambda: self.fail('should not poll once timed out')
+        task.log_info = lambda *args, **kwargs: None
+
+        self.assertFalse(task._wait_nest_cleared())
+
+    def test_is_nest_cleared_matches_tracker_text(self):
+        task = NightmareNestTask.__new__(NightmareNestTask)
+        task.ocr = lambda *args, **kwargs: [FakeBox('Tacet Discord Nest Cleared')] if \
+            kwargs['match'].search('Tacet Discord Nest Cleared') else []
+
+        self.assertTrue(task.is_nest_cleared())
 
     def test_capture_mode_does_not_check_combat_after_pickup(self):
         task = NightmareNestTask.__new__(NightmareNestTask)

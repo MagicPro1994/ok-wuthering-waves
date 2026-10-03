@@ -1,4 +1,5 @@
 import re
+import time
 import cv2
 from dataclasses import dataclass
 
@@ -9,6 +10,8 @@ from src.task.WWOneTimeTask import WWOneTimeTask
 logger = Logger.get_logger(__name__)
 TRAVEL_FEATURES = ['fast_travel_custom', 'gray_teleport', 'remove_custom']
 CONFIRM_FEATURES = ['confirm_btn_hcenter_vcenter', 'confirm_btn_highlight_hcenter_vcenter']
+# 任务追踪栏(左上)在聚落清完后会显示 "Tacet Discord Nest Cleared"
+NEST_CLEARED_RE = re.compile(r'Cleared|已清除|已清理|已完成', re.IGNORECASE)
 
 
 @dataclass
@@ -19,6 +22,7 @@ class NestTarget:
 
 class NightmareNestTask(WWOneTimeTask, BaseCombatTask):
     max_nest_deaths = 3
+    nest_cleared_time_out = 15
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -104,6 +108,8 @@ class NightmareNestTask(WWOneTimeTask, BaseCombatTask):
             try:
                 need_find = self.combat_once(wait_combat_time=wait_combat_time, target=True,
                                              raise_if_not_found=False)
+                if not is_team and not self._capture_success:
+                    self._wait_nest_cleared()
             except CharRevivedException:
                 if isinstance(nest, NestTarget):
                     deaths = self._nest_deaths.get(nest.cache_key, 0) + 1
@@ -155,6 +161,23 @@ class NightmareNestTask(WWOneTimeTask, BaseCombatTask):
         if is_team:
             self.esc_world_confirm()
         self.sleep(1)
+
+    def is_nest_cleared(self):
+        return bool(self.ocr(0, 0.2, 0.3, 0.6, match=NEST_CLEARED_RE))
+
+    def _wait_nest_cleared(self):
+        """战斗中目标丢失(波次间隙)不代表聚落已清完; 等追踪栏出现 Cleared 再找声骸, 期间若又进入战斗则继续打。"""
+        start = time.time()
+        while time.time() - start < self.nest_cleared_time_out:
+            if self.is_nest_cleared():
+                self.log_info('nightmare nest: tracker shows cleared')
+                return True
+            if self.wait_combat(target=True, time_out=1, raise_if_not_found=False):
+                self.log_info('nightmare nest: enemies still alive, keep fighting before searching echo')
+                self.combat_once(wait_combat_time=1, target=True, raise_if_not_found=False)
+                start = time.time()
+        self.log_info('nightmare nest: cleared status not detected, search echo anyway')
+        return False
 
     def _should_continue_combat_after_pickup(self):
         return not self._capture_mode and self.wait_combat(
