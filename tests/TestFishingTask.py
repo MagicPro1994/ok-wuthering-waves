@@ -36,3 +36,17 @@ class TestFishingTaskBasics(unittest.TestCase):
     def test_registered_in_config(self):
         from config import config
         self.assertIn(["src.task.FishingTask", "FishingTask"], config["onetime_tasks"])
+
+
+from src.task.FishingTask import premium_listed
+
+
+class TestPremiumListed(unittest.TestCase):
+    def test_listed(self):
+        self.assertTrue(premium_listed(["Premium Request", "Special: One Last Tear"]))
+
+    def test_refreshing_only(self):
+        self.assertFalse(premium_listed(["Premium Refresh in 1h"]))
+
+    def test_missing(self):
+        self.assertFalse(premium_listed(["Common Request", "Night Challenge"]))
