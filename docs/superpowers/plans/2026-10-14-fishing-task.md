@@ -113,13 +113,14 @@ git commit -m "feat(fishing): set Tool Key to t and add fishing package"
   - `orientations(cells) -> list[tuple[int, frozenset[Cell]]]` unique `(rotation_count, normalised_cells)`, rotation_count 0–3
   - `Placement` dataclass: `rotations: int`, `cells: frozenset[Cell]` (absolute), `origin: Cell` (min row, min col of `cells`)
   - `pack(free: Iterable[Cell], pieces: dict[str, Iterable[Cell]]) -> dict[str, Placement] | None`
+  - `pack_best(free, pieces, values: dict[str, int], required: Iterable[str] = (), node_limit: int = 200_000) -> dict[str, Placement] | None` places every `required` piece (else `None`) and the subset of the other pieces with the highest total value. Branch-and-bound: after `node_limit` nodes it returns the best plan found so far.
 
 - [ ] **Step 1: Write the failing tests**
 
 ```python
 import unittest
 
-from src.fishing.cargo_packer import normalize, rotate_cw, orientations, pack
+from src.fishing.cargo_packer import normalize, rotate_cw, orientations, pack, pack_best
 
 L = {(0, 0), (1, 0), (2, 0), (2, 1)}
 SQUARE = {(0, 0), (0, 1), (1, 0), (1, 1)}
@@ -176,6 +177,36 @@ class TestCargoPacker(unittest.TestCase):
         out = pack(grid(2, 4), {"a": BAR, "b": BAR})
         self.assertIsNotNone(out)
         self.assertEqual(grid(2, 4), out["a"].cells | out["b"].cells)
+
+    def test_best_prefers_higher_value(self):
+        out = pack_best(grid(2, 2), {"a": SQUARE, "b": SQUARE}, {"a": 5, "b": 8})
+        self.assertEqual({"b"}, set(out))
+
+    def test_best_keeps_required_over_value(self):
+        out = pack_best(grid(2, 2), {"a": SQUARE, "b": SQUARE}, {"a": 1, "b": 10}, required=["a"])
+        self.assertEqual({"a"}, set(out))
+
+    def test_best_none_when_required_does_not_fit(self):
+        self.assertIsNone(pack_best(grid(2, 2), {"a": SQUARE, "b": SQUARE}, {"a": 1, "b": 1}, required=["a", "b"]))
+
+    def test_best_picks_best_subset(self):
+        pieces = {"bar": BAR, "s1": SQUARE, "s2": SQUARE}
+        out = pack_best(grid(2, 4), pieces, {"bar": 3, "s1": 5, "s2": 5})
+        self.assertEqual({"s1", "s2"}, set(out))
+
+    def test_best_no_overlap_and_inside_free(self):
+        free = grid(3, 4, blocked=[(0, 0)])
+        out = pack_best(free, {"l": L, "sq": SQUARE, "bar": BAR}, {"l": 4, "sq": 6, "bar": 5})
+        used = [c for p in out.values() for c in p.cells]
+        self.assertEqual(len(used), len(set(used)))
+        self.assertTrue(set(used) <= free)
+
+    def test_best_node_limit_still_returns_plan(self):
+        out = pack_best(grid(2, 2), {"a": SQUARE}, {"a": 1}, node_limit=1)
+        self.assertEqual({"a"}, set(out))
+
+    def test_best_empty(self):
+        self.assertEqual({}, pack_best(grid(2, 2), {}, {}))
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -243,19 +274,53 @@ def pack(free: Iterable[Cell], pieces: Dict[str, Iterable[Cell]]) -> Optional[Di
         return False
 
     return result if place(0, free_set) else None
+
+
+def pack_best(free, pieces, values, required=(), node_limit=200_000):
+    free_set = set(free)
+    required = set(required)
+    order = sorted(pieces, key=lambda n: (n not in required, -values.get(n, 0), -len(list(pieces[n]))))
+    shapes = {name: orientations(pieces[name]) for name in order}
+    suffix = [sum(values.get(n, 0) for n in order[i:]) for i in range(len(order) + 1)]
+    best = {'value': -1, 'plan': None}
+    current: Dict[str, Placement] = {}
+    nodes = [0]
+
+    def search(i: int, available: set, value: int):
+        nodes[0] += 1
+        if nodes[0] > node_limit and best['plan'] is not None:
+            return
+        if value + suffix[i] <= best['value']:
+            return
+        if i == len(order):
+            best['value'], best['plan'] = value, dict(current)
+            return
+        name = order[i]
+        for rotation, shape in shapes[name]:
+            for r0, c0 in sorted(available):
+                cells = frozenset((r + r0, c + c0) for r, c in shape)
+                if cells <= available:
+                    current[name] = Placement(rotation, cells, (r0, c0))
+                    search(i + 1, available - cells, value + values.get(name, 0))
+                    del current[name]
+        if name not in required:
+            search(i + 1, available, value)
+
+    search(0, free_set, 0)
+    return best['plan']
 ```
 
 Note on `origin`: `(r0, c0)` is the anchor offset added to the normalised shape, so it equals the min row/min col of `cells`.
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `.\.venv\Scripts\python.exe -m pytest tests/TestCargoPacker.py -v` → PASS (9 tests).
+Run: `.\.venv\Scripts\python.exe -m pytest tests/TestCargoPacker.py -v` → PASS (16 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/fishing/cargo_packer.py tests/TestCargoPacker.py
-git commit -m "feat(fishing): add cargo packer"
+git commit -m "feat(fishing): add cargo packer with value-optimising mode"
 ```
 
 ---
@@ -1390,6 +1455,66 @@ Catch one fish on the water, let `handle_catches` run, and confirm the piece sit
 ```bash
 git add src/fishing/cargo_grid.py src/task/FishingTask.py tests/TestCargoGrid.py tests/images/fishing
 git commit -m "feat(fishing): fish mini-game and cargo placement"
+```
+
+---
+
+### Task 9b: Value-optimised cargo (gated by a live check)
+
+**Gate (live, before any code):** after delivering a request with one extra fish placed in the cargo, open the Dock Shop and Sell All. Record whether (a) the extra placed fish is still in the cargo, (b) it was sold, or (c) it was lost. If (a) or (c), stop: the optimiser must not place non-request fish, and this task is dropped (the simple packer from Task 9 stays). If (b), continue.
+
+**Files:**
+- Modify: `src/task/FishingTask.py` (`handle_catches` survey pass)
+- Modify: `src/fishing/cargo_grid.py` (`read_value`, `selected_name` regions)
+- Test: `tests/TestCargoGrid.py`
+
+**Interfaces:**
+- Consumes: `pack_best`, `cg.read_preview`, `cg.free_cells`.
+- Produces: `parse_value(texts: list[str]) -> int | None` in `cargo_grid.py`: first integer found in the price text, ignoring thousands separators; `None` if none.
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+def test_parse_value(self):
+    self.assertEqual(1240, cg.parse_value(["Price", "1,240"]))
+    self.assertEqual(95, cg.parse_value(["Price 95"]))
+    self.assertIsNone(cg.parse_value(["Size", "Micro"]))
+```
+
+- [ ] **Step 2: Run to verify it fails** → AttributeError.
+
+- [ ] **Step 3: Implement**
+
+```python
+import re
+
+def parse_value(texts):
+    for text in texts:
+        m = re.search(r'\d[\d,]*', text)
+        if m:
+            return int(m.group(0).replace(',', ''))
+    return None
+```
+
+- [ ] **Step 4: Survey pass (live-verified)**
+
+In `handle_catches`, before placing anything: for each card, click it, OCR the detail panel (name and price; region measured live and stored as `cg.DETAIL_REGION`), read the preview shape, then deselect (measured live: clicking the same card again, or Esc; record which works in `cg.DESELECT` and verify the card is unhighlighted). Cache shapes by fish name so a repeated species is not re-surveyed. Then:
+
+```python
+plan = pack_best(cg.free_cells(self.occupied), shapes, values, required=request_fish)
+```
+
+`request_fish` are the names the tracker asks for (parsed from the objective lines). Place each planned fish in order (`place_fish` from Task 9, using its `Placement`); fish not in the plan stay in the Catch List for Sell All. If `plan` is `None` (a request fish does not fit), `fail('request fish does not fit the cargo')`.
+
+- [ ] **Step 5: Live check (user watching)**
+
+With four or more fish caught, confirm: request fish are placed first, extra fish are placed only where they fit and only if the gate said they are sold, and no fish is left selected before Finish.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/fishing/cargo_grid.py src/task/FishingTask.py tests/TestCargoGrid.py
+git commit -m "feat(fishing): value-optimised cargo placement"
 ```
 
 ---
