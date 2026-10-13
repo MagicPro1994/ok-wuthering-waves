@@ -26,6 +26,10 @@ def premium_listed(texts):
     return bool(premium) and not all('refresh' in t for t in premium)
 
 
+def catch_list_empty(texts):
+    return any('no catch' in t.lower() for t in texts)
+
+
 class FishingTask(WWOneTimeTask, BaseWWTask):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -220,10 +224,38 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
         self.turn_camera(random.choice([-1, 1]) * random.uniform(80, 100))
         self.hold_key('w', random.uniform(1.5, 2.5))
 
+    # ---- deliver and sell ----------------------------------------------
+
+    def deliver(self):
+        self.info_set('current task', 'deliver')
+        self.send_key(self.key_config.get('Tool Key'), after_sleep=1.5)
+        self.click_at(0.657, 0.628, after_sleep=2.0)       # Confirm fast travel to the dock
+        self.wait_until(lambda: self.has_text('Return to the dock'), time_out=60)
+        self.send_key('f', after_sleep=2.5)
+        self.click_at(0.2375, 0.296, after_sleep=1.0)      # request "..."
+        self.click_at(0.875, 0.902, after_sleep=2.0)       # Deliver
+        self.click_at(0.5, 0.85, after_sleep=1.5)          # close rewards
+
+    def sell_all(self):
+        self.info_set('current task', 'sell all')
+        self.click_at(0.835, 0.93, after_sleep=2.0)        # Dock Shop
+        self.send_key('c', after_sleep=1.2)                # Catch List
+        if catch_list_empty(self.texts(0, 0, 0.5, 1)):
+            self.send_key('esc', after_sleep=1.0)
+            return
+        if self.has_text('handle the selected item'):
+            self.release_selected_fish()
+        self.click_at(0.72, 0.91, after_sleep=1.2)         # Sell All
+        if self.has_text('Request items for sale'):
+            self.click_at(0.657, 0.628, after_sleep=1.5)   # Confirm
+        self.click_at(0.5, 0.85, after_sleep=1.5)          # close "Items Obtained"
+        if not catch_list_empty(self.texts(0, 0, 0.5, 1)):
+            self.fail('Catch List not empty after Sell All')
+        self.send_key('esc', after_sleep=1.0)
+
     # ---- states (filled in by later tasks) -----------------------------
 
     def go_to_dock(self): raise NotImplementedError
     def fish(self): raise NotImplementedError
     def handle_catches(self): raise NotImplementedError
-    def deliver(self): raise NotImplementedError
-    def sell_all(self): raise NotImplementedError
+    def release_selected_fish(self): raise NotImplementedError  # needs cargo_grid (Task 9)

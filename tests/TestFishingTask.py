@@ -66,3 +66,10 @@ class TestNextAction(unittest.TestCase):
     def test_small_error_goes_forward(self):
         self.assertEqual('forward', next_action(3.9, True))
         self.assertEqual('forward', next_action(-4.0, True))
+
+
+class TestSellText(unittest.TestCase):
+    def test_no_catch_detected(self):
+        from src.task.FishingTask import catch_list_empty
+        self.assertTrue(catch_list_empty(["Catch List", "No Catch"]))
+        self.assertFalse(catch_list_empty(["Catch List", "Giant Gulper"]))
