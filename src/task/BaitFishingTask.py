@@ -211,9 +211,9 @@ class BaitFishingTask(FishingTask):
         return self.has_text(r'Cargo|Catch', 0.0, 0.0, 0.6, 0.15)
 
     LOAD_PASSES = 4
-    PLACE_WAIT = 4    # seconds for the Cargo counter to rise after a drop
+    PLACE_WAIT = 4    # seconds for the Cargo counter to rise after a confirm
 
-    def load_cargo(self):
+    def load_cargo(self, finish=True):
         self.info_set('current task', 'load cargo')
         if not self.wait_until(self.cargo_screen_open, time_out=15):
             self.fail('Cargo screen not open')
@@ -231,26 +231,34 @@ class BaitFishingTask(FishingTask):
             # a full list may hide more fish behind the visible cards: look again once the placed ones have left
             if not plan or len(catches) < cg.MAX_CARDS:
                 break
-        self.click_at(*ui.FINISH_AT, after_sleep=random.uniform(1.0, 1.6))
+        if finish:
+            self.click_at(*ui.FINISH_AT, after_sleep=random.uniform(1.0, 1.6))
 
     def cargo_used(self):
         return cg.parse_cargo_used(self.texts(*cg.CARGO_COUNT_BOX))
 
+    clean_base = None    # the last survey's frame without a draft, good until the next confirm
+
     def survey_catches(self):
-        # Click every card slot: the click shows the fish as a ghost on the grid, the value is read off the card.
-        # A slot without a card keeps the previous ghost (or none) and has no value.
+        # Clicking a card shows its fish as a draft at the top-left of the grid: diff it against the frame without one
+        # (none is showing when the Cargo screen opens). The value is read off the card. A slot without a card leaves
+        # the previous draft in place and has no value.
+        base = self.rgb_frame()
+        self.clean_base = base
         catches = []
         previous = frozenset()
         for slot in range(cg.MAX_CARDS):
             self.click_at(*cg.card_center(slot), after_sleep=random.uniform(0.6, 0.9))
-            cells = cg.read_ghost(self.rgb_frame())
+            cells = cg.read_preview(base, self.rgb_frame())
             if slot == 0:
                 self.screenshot('cargo_first_card')
             value = cg.parse_value(self.texts(*cg.card_box(slot)))
-            if value is None and (not cells or cells == previous):
-                break
             if not cells:
-                self.fail(f'cargo: slot {slot} shows a value of {value} but no ghost on the grid; nothing was lost')
+                if value is not None:
+                    self.fail(f'cargo: slot {slot} shows a value of {value} but no draft on the grid; nothing was lost')
+                break
+            if value is None and cells == previous:
+                break
             if value is None:
                 self.log_info(f'slot {slot}: card value unreadable, using its {len(cells)} cells as the value')
                 value = len(cells)
@@ -259,15 +267,25 @@ class BaitFishingTask(FishingTask):
         return catches
 
     def place_catch(self, catch, placement):
-        """Place one catch by dragging its ghost and confirming with Space; True when the Cargo counter rose, False when it did not (caller stops)."""
+        """Place one catch: draft it, drag it onto the plan, confirm with Space. True once the Cargo counter rose.
+
+        False means it was left (the caller stops). Never press `t`: that trashes the fish.
+        """
+        # placed fish are part of the base and no draft may show in it: a confirm clears the draft, but right after
+        # a survey the last probed card's draft is still up, so that first placement uses the survey's own base
+        base = self.clean_base if self.clean_base is not None else self.rgb_frame()
+        self.clean_base = None
         self.click_at(*cg.card_center(catch.slot), after_sleep=random.uniform(0.6, 0.9))
-        cells = cg.read_ghost(self.rgb_frame())
-        # rotate by re-reading the ghost, never by counting presses: the rotation direction is the game's
+        cells = cg.read_preview(base, self.rgb_frame())
+        if not cells:
+            self.log_info(f'slot {catch.slot}: no draft showed after clicking its card, leaving it')
+            return False
+        # rotate by re-reading the draft, never by counting presses: the rotation direction is the game's
         for _ in range(4):
             if shape_matches(cells, placement):
                 break
             self.send_key('r', after_sleep=random.uniform(0.4, 0.7))
-            cells = cg.read_ghost(self.rgb_frame())
+            cells = cg.read_preview(base, self.rgb_frame())
         else:
             self.log_info(f'slot {catch.slot}: could not rotate to the planned shape, leaving it')
             return False
@@ -275,18 +293,19 @@ class BaitFishingTask(FishingTask):
         if used_before is None:
             self.log_info(f'slot {catch.slot}: Cargo counter unreadable, leaving it')
             return False
-        grab, drop = grab_and_drop(cells, placement)
-        src, dst = cg.cell_center(*grab), cg.cell_center(*drop)
-        if grab == drop:
-            # the game needs a real movement: end a quarter cell to the right, still inside the cell
-            dst = (dst[0] + cg.CELL_PX / 4 / 1920.0, dst[1])
-        self.real.drag(src[0], src[1], dst[0], dst[1], random.uniform(0.8, 1.1))
+        if cells != placement.cells:
+            grab, drop = grab_and_drop(cells, placement)
+            src, dst = cg.cell_center(*grab), cg.cell_center(*drop)
+            self.real.drag(src[0], src[1], dst[0], dst[1], random.uniform(0.8, 1.1))
+            self.sleep(random.uniform(0.5, 0.8))
+            if cg.read_preview(base, self.rgb_frame()) != placement.cells:
+                self.log_info(f'slot {catch.slot}: the draft did not land on the planned cells, leaving it')
+                return False
+        self.send_key('space', after_sleep=random.uniform(0.6, 1.0))
         want = used_before + len(placement.cells)
         if not self.wait_until(lambda: self.cargo_used() == want, time_out=self.PLACE_WAIT):
             self.log_info(f'slot {catch.slot}: the Cargo counter did not reach {want}, leaving it')
             return False
-        # the dropped fish is only a draft until Space confirms it (never 't': that trashes it)
-        self.send_key('space', after_sleep=random.uniform(0.6, 1.0))
         return True
 
     def release_selected_fish(self):

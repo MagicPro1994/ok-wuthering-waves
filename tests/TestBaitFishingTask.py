@@ -140,14 +140,17 @@ class TestCatchFish(unittest.TestCase):
 class Surveyor(BaitFishingTask):
     """A Catches screen: `shapes` maps slot -> cells, `values` slot -> value text.
 
-    Clicking a slot with a card shows that fish as a ghost on the grid; clicking a slot without one leaves the ghost.
+    Clicking a slot with a card shows that fish as a coloured draft on the grid; clicking a slot without one leaves the
+    draft as it is. Cells in `placed` are part of the cargo and always coloured.
     """
 
     def __init__(self, shapes, values=None):
         self.shapes = dict(shapes)
         self.values = values if values is not None else {slot: 1200 for slot in shapes}
         self.clicked = []
-        self.ghost = frozenset()
+        self.draft = frozenset()
+        self.selected = None
+        self.placed = set()
         self.notes = []
         self.keys = []
 
@@ -171,14 +174,14 @@ class Surveyor(BaitFishingTask):
         self.clicked.append((fx, fy))
         slot = self.slot_at(fx, fy)
         if slot in self.shapes:
-            self.ghost = frozenset(self.shapes[slot])
+            self.selected = slot
+            self.draft = frozenset(self.shapes[slot])
 
     def rgb_frame(self):
         frame = np.full((1080, 1920, 3), 52, np.uint8)
-        for r, c in self.ghost:
-            x0 = int(cg.GRID_ORIGIN[0] + c * cg.CELL_PX)
-            y0 = int(cg.GRID_ORIGIN[1] + r * cg.CELL_PX)
-            frame[y0 + 3:y0 + 7, x0 + 3:x0 + 108] = 245     # a stretch of the dashed outline
+        for r, c in set(self.draft) | set(self.placed):
+            x, y = cg.cell_center(r, c)
+            frame[int(y * 1080) - 30:int(y * 1080) + 30, int(x * 1920) - 30:int(x * 1920) + 30] = (90, 160, 230)
         return frame
 
     def texts(self, x=0, y=0, to_x=1, to_y=1):
@@ -202,9 +205,9 @@ class TestSurvey(unittest.TestCase):
         self.assertEqual([0, 1], [c.slot for c in catches])
         self.assertEqual(frozenset({(2, 2), (2, 3)}), catches[0].cells)
         self.assertEqual(1200, catches[0].value)
-        self.assertEqual(3, len(task.clicked))     # slot 2 was probed: no value, the ghost is still slot 1's
+        self.assertEqual(3, len(task.clicked))     # slot 2 was probed: no value, the draft is still slot 1's
 
-    def test_stops_at_a_slot_with_no_value_and_no_ghost(self):
+    def test_stops_at_a_slot_with_no_value_and_no_draft(self):
         task = Surveyor({})
         self.assertEqual([], task.survey_catches())
         self.assertEqual(1, len(task.clicked))
@@ -213,22 +216,21 @@ class TestSurvey(unittest.TestCase):
         shapes = {s: [(s, 1)] for s in range(cg.MAX_CARDS)}
         self.assertEqual(cg.MAX_CARDS, len(Surveyor(shapes).survey_catches()))
 
-    def test_fails_when_a_value_is_read_but_no_ghost_shows(self):
-        # slot 1 shows a value, but clicking it puts no ghost on the grid
-        task = Surveyor({0: [(2, 2)]}, values={0: 100, 1: 250})
-        original = task.click_at
+    def test_fails_when_a_value_is_read_but_no_draft_shows(self):
+        task = Surveyor({0: [(2, 2)]}, values={0: 100, 1: 250})     # slot 1 reads a value but selects nothing
+        click = task.click_at
 
-        def click(fx, fy, after_sleep=0.4):
-            original(fx, fy, after_sleep)
+        def click_at(fx, fy, after_sleep=0.4):
+            click(fx, fy, after_sleep)
             if task.slot_at(fx, fy) == 1:
-                task.ghost = frozenset()
+                task.draft = frozenset()
 
-        task.click_at = click
+        task.click_at = click_at
         with self.assertRaises(Exception) as ctx:
             task.survey_catches()
         self.assertIn('slot 1', str(ctx.exception))
 
-    def test_fails_when_the_first_card_has_a_value_but_no_ghost(self):
+    def test_fails_when_the_first_card_has_a_value_but_no_draft(self):
         task = Surveyor({}, values={0: 100})
         with self.assertRaises(Exception) as ctx:
             task.survey_catches()
@@ -236,7 +238,7 @@ class TestSurvey(unittest.TestCase):
 
 
 class TestSurveyValue(unittest.TestCase):
-    def test_unreadable_value_with_a_new_ghost_uses_the_cell_count(self):
+    def test_unreadable_value_with_a_new_draft_uses_the_cell_count(self):
         task = Surveyor({0: [(2, 2), (2, 3)]}, values={})
         catches = task.survey_catches()
         self.assertEqual(2, catches[0].value)
@@ -244,14 +246,15 @@ class TestSurveyValue(unittest.TestCase):
 
 
 class Placer(Surveyor):
-    """Dragging the ghost places the fish: the card leaves the list and the Cargo counter rises."""
+    """Dragging moves the draft; Space confirms it: the cells become cargo, the card leaves, the Cargo counter rises."""
 
-    def __init__(self, shapes, values=None, rise=True):
+    def __init__(self, shapes, values=None, confirm=True):
         super().__init__(shapes, values)
         self.used = 7
-        self.rise = rise
+        self.confirm = confirm      # False: Space does nothing
         self.drags = []
-        self.rotations = None       # successive ghost shapes shown by `r`, if set
+        self.rotations = None       # successive draft shapes shown by `r`, if set
+        self.slip = (0, 0)          # cells the drop misses the target by
         self.real = self
         self.events = []
 
@@ -261,67 +264,89 @@ class Placer(Surveyor):
 
     def texts(self, x=0, y=0, to_x=1, to_y=1):
         if (x, y, to_x, to_y) == cg.CARGO_COUNT_BOX:
-            if self.drags:
-                self.events.append('counter')
+            self.events.append('counter')
             return [f'Cargo: {self.used}/52']
         return super().texts(x, y, to_x, to_y)
 
     def send_key(self, key, after_sleep=0.2, **kwargs):
         super().send_key(key, after_sleep)
-        if key == 'space':
-            self.events.append('space')
+        self.events.append(key)
         if key == 'r' and self.rotations:
-            self.ghost = frozenset(self.rotations.pop(0))
+            self.draft = frozenset(self.rotations.pop(0))
+        if key == 'space' and self.confirm and self.draft:
+            self.placed |= self.draft
+            self.used += len(self.draft)
+            self.shapes.pop(self.selected, None)
+            self.draft = frozenset()
 
     def drag(self, x0, y0, x1, y1, duration):
-        self.drags.append(((x0, y0), (x1, y1)))
         self.events.append('drag')
-        if self.rise:
-            self.used += len(self.ghost)
-            self.ghost = frozenset()
+        self.drags.append(((x0, y0), (x1, y1)))
+        # the draft moves by the distance between the two cells
+        dr = round((y1 - y0) * 1080 / cg.CELL_PX) + self.slip[0]
+        dc = round((x1 - x0) * 1920 / cg.CELL_PX) + self.slip[1]
+        self.draft = frozenset((r + dr, c + dc) for r, c in self.draft)
 
     def wait_until(self, condition, time_out=10, **kwargs):
         return condition()
 
 
 class TestPlaceCatch(unittest.TestCase):
-    def test_drags_the_ghost_onto_the_plan_and_verifies_the_counter(self):
+    def test_drags_the_draft_onto_the_plan_confirms_and_verifies_the_counter(self):
         cells = frozenset({(2, 2), (2, 3)})
         task = Placer({1: sorted(cells)})
-        placement = Placement(0, frozenset({(4, 4), (4, 5)}), (4, 4))
-        self.assertTrue(task.place_catch(Catch(1, cells, 100), placement))
+        want = frozenset({(4, 4), (4, 5)})
+        self.assertTrue(task.place_catch(Catch(1, cells, 100), Placement(0, want, (4, 4))))
         self.assertEqual([(cg.cell_center(2, 2), cg.cell_center(4, 4))], task.drags)
         self.assertEqual(9, task.used)
-        self.assertEqual(['space'], task.keys)
-        self.assertEqual(['click', 'drag', 'counter', 'space'], task.events)
+        self.assertEqual(want, task.placed)
+        self.assertEqual(['click', 'counter', 'drag', 'space', 'counter'], task.events)
+        self.assertNotIn('t', task.keys)
 
-    def test_a_ghost_already_on_target_is_still_dragged_a_little(self):
+    def test_a_draft_already_on_target_is_confirmed_without_a_drag(self):
         cells = frozenset({(2, 2), (2, 3)})
         task = Placer({0: sorted(cells)})
         self.assertTrue(task.place_catch(Catch(0, cells, 100), Placement(0, cells, (2, 2))))
-        (src, dst), = task.drags
-        self.assertEqual(src, cg.cell_center(2, 2))
-        self.assertNotEqual(src, dst)
-        self.assertAlmostEqual(src[1], dst[1])
-        self.assertLess(abs(dst[0] - src[0]) * 1920, cg.CELL_PX / 2)
+        self.assertEqual([], task.drags)
+        self.assertEqual(['space'], task.keys)
 
-    def test_rotates_by_reading_the_ghost_again(self):
+    def test_rotates_by_reading_the_draft_again(self):
         flat = [(2, 2), (2, 3)]
         upright = [(2, 2), (3, 2)]
         task = Placer({1: flat})
         task.rotations = [flat, upright]
-        placement = Placement(0, frozenset({(5, 5), (6, 5)}), (5, 5))
-        self.assertTrue(task.place_catch(Catch(1, frozenset(flat), 5), placement))
+        want = frozenset({(5, 5), (6, 5)})
+        self.assertTrue(task.place_catch(Catch(1, frozenset(flat), 5), Placement(0, want, (5, 5))))
         self.assertEqual(['r', 'r', 'space'], task.keys)
         self.assertEqual(cg.cell_center(2, 2), task.drags[0][0])
+        self.assertEqual(want, task.placed)
+
+    def test_returns_false_without_confirming_when_the_drop_misses(self):
+        cells = frozenset({(2, 2), (2, 3)})
+        task = Placer({1: sorted(cells)})
+        task.slip = (0, 1)
+        self.assertFalse(task.place_catch(Catch(1, cells, 100), Placement(0, frozenset({(4, 4), (4, 5)}), (4, 4))))
+        self.assertNotIn('space', task.keys)
+        self.assertTrue(any('did not land' in n for n in task.notes))
 
     def test_returns_false_when_the_counter_does_not_rise(self):
         cells = frozenset({(2, 2), (2, 3)})
-        task = Placer({1: sorted(cells)}, rise=False)
-        placement = Placement(0, frozenset({(4, 4), (4, 5)}), (4, 4))
-        self.assertFalse(task.place_catch(Catch(1, cells, 100), placement))
+        task = Placer({1: sorted(cells)}, confirm=False)
+        self.assertFalse(task.place_catch(Catch(1, cells, 100), Placement(0, frozenset({(4, 4), (4, 5)}), (4, 4))))
         self.assertTrue(any('counter' in n for n in task.notes))
+
+    def test_returns_false_when_the_counter_is_unreadable(self):
+        cells = frozenset({(2, 2)})
+        task = Placer({1: [(2, 2)]})
+        task.texts = lambda *a, **k: []
+        self.assertFalse(task.place_catch(Catch(1, cells, 5), Placement(0, cells, (2, 2))))
         self.assertNotIn('space', task.keys)
+
+    def test_returns_false_when_the_card_shows_no_draft(self):
+        task = Placer({})
+        cells = frozenset({(2, 2)})
+        self.assertFalse(task.place_catch(Catch(1, cells, 5), Placement(0, cells, (2, 2))))
+        self.assertEqual([], task.keys)
 
     def test_returns_false_when_it_cannot_rotate_to_the_shape(self):
         task = Placer({1: [(2, 2), (2, 3)]})
@@ -329,6 +354,15 @@ class TestPlaceCatch(unittest.TestCase):
         self.assertFalse(task.place_catch(Catch(1, frozenset({(2, 2), (2, 3)}), 5), Placement(0, want, (2, 2))))
         self.assertEqual(['r'] * 4, task.keys)
         self.assertEqual([], task.drags)
+
+    def test_the_first_placement_after_a_survey_ignores_the_draft_the_survey_left(self):
+        shapes = {0: [(0, 0), (0, 1)], 1: [(0, 0), (1, 0)]}
+        task = Placer(shapes)
+        catches = task.survey_catches()                  # the last probed card's draft stays up
+        self.assertTrue(task.draft)
+        want = frozenset({(3, 3), (4, 3)})
+        self.assertTrue(task.place_catch(catches[1], Placement(0, want, (3, 3))))
+        self.assertEqual(want, task.placed)
 
 
 class Loader(Placer):
@@ -368,6 +402,11 @@ class TestLoadCargo(unittest.TestCase):
         self.assertEqual([1], task.tried)
         self.assertNotIn(ui.FINISH_AT, task.clicked)
 
+    def test_finish_can_be_left_to_the_player(self):
+        task = Loader([two_catches()], [True, True])
+        task.load_cargo(finish=False)
+        self.assertNotIn(ui.FINISH_AT, task.clicked)
+
     def test_places_everything_when_all_succeed_in_one_pass(self):
         task = Loader([two_catches()], [True, True])
         task.load_cargo()
@@ -400,6 +439,32 @@ class TestLoadCargo(unittest.TestCase):
             task.load_cargo()
         self.assertIn('Finish not pressed', str(ctx.exception))
         self.assertNotIn(ui.FINISH_AT, task.clicked)
+
+
+class TestCargoHelper(unittest.TestCase):
+    def test_registered_in_config(self):
+        from config import config
+        self.assertIn(["src.task.CargoHelperTask", "CargoHelperTask"], config["onetime_tasks"])
+
+    def test_arranges_the_cargo_without_pressing_finish(self):
+        from src.task import CargoHelperTask as module
+
+        class Stub(module.CargoHelperTask):
+            hwnd = types.SimpleNamespace(hwnd=1)
+
+        task = Stub.__new__(Stub)
+        calls = []
+        task.load_cargo = lambda finish=True: calls.append(finish)
+        task.log_info = lambda *a, **k: calls.append('log')
+        original = (module.WWOneTimeTask.run, module.RealInput)
+        module.WWOneTimeTask.run = lambda self: None
+        module.RealInput = lambda hwnd: 'real'
+        try:
+            task.run()
+        finally:
+            module.WWOneTimeTask.run, module.RealInput = original
+        self.assertEqual([False, 'log'], calls)
+        self.assertEqual('real', task.real)
 
 
 class Prompter(BaitFishingTask):

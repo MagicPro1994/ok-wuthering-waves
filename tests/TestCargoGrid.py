@@ -83,43 +83,22 @@ class TestCards(unittest.TestCase):
         self.assertTrue(x0 < x < x1 and y0 < y < y1)
 
 
-def ghost(img, cells):
-    """Draw the game's ghost: a dashed near-white square outline (inset 4 px, 3 px thick, 10 px dash / 6 px gap) per cell."""
-    out = img.copy()
-    for r, c in cells:
-        x0 = int(cg.GRID_ORIGIN[0] + c * cg.CELL_PX) + 4
-        y0 = int(cg.GRID_ORIGIN[1] + r * cg.CELL_PX) + 4
-        x1 = int(cg.GRID_ORIGIN[0] + (c + 1) * cg.CELL_PX) - 4
-        y1 = int(cg.GRID_ORIGIN[1] + (r + 1) * cg.CELL_PX) - 4
-        for t in range(3):
-            for i in range(0, x1 - x0, 16):
-                out[y0 + t, x0 + i:min(x0 + i + 10, x1)] = (245, 245, 245)
-                out[y1 - t, x0 + i:min(x0 + i + 10, x1)] = (245, 245, 245)
-            for i in range(0, y1 - y0, 16):
-                out[y0 + i:min(y0 + i + 10, y1), x0 + t] = (245, 245, 245)
-                out[y0 + i:min(y0 + i + 10, y1), x1 - t] = (245, 245, 245)
-    return out
+class TestRealDrafts(unittest.TestCase):
+    """A clicked card shows a draft anchored at the top-left of the grid; diffing against the no-draft frame reads it."""
 
+    def test_snail_draft_is_read_exactly(self):
+        base = fixture("cargo_catches_base.png")
+        cells = cg.read_preview(base, fixture("cargo_draft_snail.png"))
+        self.assertEqual(frozenset({(0, 0), (0, 1), (1, 0), (1, 1), (1, 2), (2, 1)}), cells)
 
-class TestGhost(unittest.TestCase):
-    def test_empty_cargo_has_no_ghost(self):
-        self.assertEqual(frozenset(), cg.read_ghost(fixture("cargo_empty.png")))
+    def test_tripod_draft_contains_its_cells(self):
+        base = fixture("cargo_catches_base.png")
+        cells = cg.read_preview(base, fixture("cargo_draft_tripod.png"))
+        self.assertTrue({(0, 0), (0, 1), (0, 2), (0, 3), (1, 1), (1, 2), (2, 1)} <= cells)
 
-    def test_reads_the_cells_of_a_drawn_ghost(self):
-        cells = [(2, 2), (3, 2), (4, 2), (4, 3)]
-        self.assertEqual(frozenset(cells), cg.read_ghost(ghost(fixture("cargo_empty.png"), cells)))
-
-    def test_reads_ghost_cells_over_filled_cells(self):
-        img = paint(fixture("cargo_empty.png"), [(1, 1), (1, 2)], (160, 100, 180))
-        for r, c in [(1, 1), (1, 2)]:
-            x0 = int(cg.GRID_ORIGIN[0] + c * cg.CELL_PX)
-            y0 = int(cg.GRID_ORIGIN[1] + r * cg.CELL_PX)
-            img[y0 + 2:y0 + 108, x0 + 2:x0 + 108] = (160, 100, 180)
-        cells = [(1, 1), (1, 2), (1, 3)]
-        self.assertEqual(frozenset(cells), cg.read_ghost(ghost(img, cells)))
-
-    def test_ignores_blocked_cells(self):
-        self.assertEqual(frozenset(), cg.read_ghost(ghost(fixture("cargo_empty.png"), [(0, 0)])))
+    def test_base_frame_has_no_draft(self):
+        base = fixture("cargo_catches_base.png")
+        self.assertEqual(frozenset(), cg.read_preview(base, base))
 
 
 class TestParseCargoUsed(unittest.TestCase):

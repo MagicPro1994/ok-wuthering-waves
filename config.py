@@ -273,6 +273,7 @@ config = {
         ["src.task.GardenTask", "GardenTask"],
         ["src.task.FishingTask", "FishingTask"],
         ["src.task.BaitFishingTask", "BaitFishingTask"],
+        ["src.task.CargoHelperTask", "CargoHelperTask"],
         # ["src.task.DiagnosisTask", "DiagnosisTask"],
     ], 'trigger_tasks': [
         ["src.task.AutoCombatTask", "AutoCombatTask"],

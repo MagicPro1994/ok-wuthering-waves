@@ -21,7 +21,6 @@ CARD_COLS = 3
 CARD_SIZE = (210.0, 188.0)
 MAX_CARDS = 6
 CARGO_COUNT_BOX = (0.42, 0.04, 0.56, 0.10)   # the "Cargo: 7/52" counter at the top
-GHOST_MIN_RGB = 170             # the ghost's dashed outline is near white
 
 
 def cell_center(row: int, col: int) -> Tuple[float, float]:
@@ -88,27 +87,6 @@ def card_box(slot: int) -> Tuple[float, float, float, float]:
     x, y = card_center(slot)
     half_w, half_h = CARD_SIZE[0] / 2 / 1920.0, CARD_SIZE[1] / 2 / 1080.0
     return x - half_w, y - half_h, x + half_w, y + half_h
-
-
-def read_ghost(rgb: np.ndarray, threshold: float = 0.08) -> FrozenSet[Cell]:
-    """Cells carrying the ghost's white dashed outline (a band 1 to 8 px inside the cell edge). Absolute: no base frame."""
-    found = set()
-    for r in range(GRID_ROWS):
-        for c in range(GRID_COLS):
-            if (r, c) in BLOCKED:
-                continue
-            x0 = int(GRID_ORIGIN[0] + c * CELL_PX)
-            y0 = int(GRID_ORIGIN[1] + r * CELL_PX)
-            x1 = int(GRID_ORIGIN[0] + (c + 1) * CELL_PX)
-            y1 = int(GRID_ORIGIN[1] + (r + 1) * CELL_PX)
-            patch = rgb[y0:y1, x0:x1]
-            bright = patch.min(axis=2) >= GHOST_MIN_RGB
-            band = np.zeros(bright.shape, dtype=bool)
-            band[1:-1, 1:-1] = True
-            band[8:-8, 8:-8] = False
-            if bright[band].mean() >= threshold:
-                found.add((r, c))
-    return frozenset(found)
 
 
 def parse_cargo_used(texts: Iterable[str]) -> Optional[int]:
