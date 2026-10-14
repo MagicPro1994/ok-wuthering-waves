@@ -102,6 +102,31 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
 
     # ---- dock, premium request, preparation ----------------------------
 
+    EVENTS_KEY = 'f1'
+    PERMANENT_TAB = (0.04, 0.48)
+    OLD_MAN_LIST = (0.08, 0.1, 0.24, 1.0)   # OCR region of the event list
+    EVENT_GO = (0.872, 0.915)
+    FAST_TRAVEL = (0.832, 0.931)
+
+    def go_to_dock(self):
+        self.info_set('current task', 'go to dock')
+        self.send_key(self.EVENTS_KEY, after_sleep=2.0)
+        self.click_at(*self.PERMANENT_TAB, after_sleep=1.5)
+        for _ in range(8):
+            if self.click_ocr_text('Old Man', *self.OLD_MAN_LIST):
+                break
+            # the list only scrolls with a real cursor drag
+            self.real.drag(0.14, 0.85, 0.14, random.uniform(0.5, 0.6), random.uniform(0.7, 0.9))
+            self.sleep(1.0)
+        else:
+            self.fail('Old Man event not found in the Events list')
+        self.sleep(1.0)
+        self.click_at(*self.EVENT_GO, after_sleep=3.0)            # opens the map on the dock
+        self.click_at(*self.FAST_TRAVEL, after_sleep=2.0)
+        self.wait_ocr(match=re.compile('Check the dock', re.I), time_out=90, raise_if_not_found=True,
+                      settle_time=1.0)
+        self.send_key('f', after_sleep=2.0)                       # opens the Dock hub
+
     def pick_premium(self):
         # Planck dialog -> "Fishing Request"; the Premium tab/entry is at the top of the request list.
         self.wait_ocr(match=re.compile('Fishing Request', re.I), time_out=15, raise_if_not_found=True,
@@ -255,7 +280,6 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
 
     # ---- states (filled in by later tasks) -----------------------------
 
-    def go_to_dock(self): raise NotImplementedError
     def fish(self): raise NotImplementedError
     def handle_catches(self): raise NotImplementedError
     def release_selected_fish(self): raise NotImplementedError  # needs cargo_grid (Task 9)
