@@ -84,11 +84,21 @@ class BaitFishingTask(FishingTask):
 
     # ---- utilities -----------------------------------------------------
 
+    def wheel_open(self):
+        # the utility counts printed on the wheel only exist while it is open
+        return parse_count(self.texts(*ui.WHEEL_BOX)) is not None
+
     def equip(self, name):
-        self.send_key(self.key_config.get('Wheel Key'), after_sleep=random.uniform(0.7, 1.1))
+        wheel_key = self.key_config.get('Wheel Key')
+        self.send_key(wheel_key, after_sleep=random.uniform(0.7, 1.1))
+        if not self.wait_until(self.wheel_open, time_out=5):
+            self.fail('utility wheel did not open')
         self.click_at(*ui.UTILITY_SLOTS[name], after_sleep=random.uniform(0.6, 1.0))
-        if not ui.WHEEL_CLOSES_ON_PICK:
-            self.send_key(self.key_config.get('Wheel Key'), after_sleep=random.uniform(0.6, 1.0))
+        if self.wait_until(lambda: not self.wheel_open(), time_out=3):
+            return
+        self.send_key(wheel_key, after_sleep=random.uniform(0.6, 1.0))   # the pick left the wheel open
+        if not self.wait_until(lambda: not self.wheel_open(), time_out=4):
+            self.fail('utility wheel did not close after picking ' + name)
 
     def utility_count(self):
         for _ in range(3):
