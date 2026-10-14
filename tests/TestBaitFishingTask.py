@@ -824,17 +824,19 @@ class TestEquip(unittest.TestCase):
         task.equip('baiting')
         self.assertEqual([('down', 'tab'), ('point', 0.5, 0.5), ('point', 0.601, 0.319), ('up', 'tab')], task.events)
 
-    def test_releases_the_key_when_the_wheel_never_opens(self):
+    def test_a_missed_wheel_ocr_does_not_stop_the_pick(self):
         task = Equipper([False])
-        with self.assertRaises(Exception) as ctx:
-            task.equip('baiting')
-        self.assertIn('did not open', str(ctx.exception))
-        self.assertEqual([('down', 'tab'), ('up', 'tab')], task.events)
+        task.equip('baiting')
+        self.assertEqual([('down', 'tab'), ('point', 0.5, 0.5), ('point', 0.601, 0.319), ('up', 'tab')], task.events)
 
-    def test_fails_when_the_wheel_never_closes(self):
+    def test_retries_the_whole_pick_and_then_fails_when_the_name_never_shows(self):
+        task = Equipper([False])
+        task.hover = [False]
         with self.assertRaises(Exception) as ctx:
-            Equipper([True]).equip('sweet_puff')
-        self.assertIn('did not close', str(ctx.exception))
+            task.equip('sweet_puff')
+        self.assertIn('could not pick sweet_puff', str(ctx.exception))
+        self.assertEqual(3, len([e for e in task.events if e == ('down', 'tab')]))
+        self.assertEqual(3, len([e for e in task.events if e == ('up', 'tab')]))
 
 
 class Launcher(BaitFishingTask):
@@ -1078,12 +1080,4 @@ class TestEquipHover(unittest.TestCase):
         points = [e for e in task.events if e[0] == 'point']
         self.assertEqual([('point', 0.5, 0.5), ('point', 0.601, 0.319), ('point', 0.5, 0.5), ('point', 0.601, 0.319)],
                          points)
-        self.assertEqual(('up', 'tab'), task.events[-1])
-
-    def test_releases_anyway_after_three_misses(self):
-        task = Equipper([True, False])
-        task.hover = [False]
-        task.equip('baiting')
-        self.assertEqual(3, len([e for e in task.events if e == ('point', 0.601, 0.319)]))
-        self.assertTrue(any(e[0] == 'log' for e in task.events))
         self.assertEqual(('up', 'tab'), task.events[-1])

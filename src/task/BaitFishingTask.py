@@ -94,8 +94,14 @@ class BaitFishingTask(FishingTask):
                 or self.has_text(r'Release\s*to\s*switch', *ui.WHEEL_CENTER_BOX))
 
     def hovering(self, name):
-        # the wheel's centre prints the name of the utility under the cursor
-        return self.wait_until(lambda: self.has_text(ui.UTILITY_NAMES[name], *ui.WHEEL_CENTER_BOX), time_out=1.5)
+        # the wheel's centre prints "Release to switch" and the name of the utility under the cursor
+        def shown():
+            if self.has_text(ui.UTILITY_NAMES[name], *ui.WHEEL_CENTER_BOX):
+                return True
+            # the Sweet Puff label is not known for sure: any hovered utility that is not Baiting counts for it
+            return (name == 'sweet_puff' and self.has_text(r'Release\s*to\s*switch', *ui.WHEEL_CENTER_BOX)
+                    and not self.has_text(ui.UTILITY_NAMES['baiting'], *ui.WHEEL_CENTER_BOX))
+        return self.wait_until(shown, time_out=1.5)
 
     def point_cursor(self, fx, fy):
         # the wheel picks the slot under the real cursor when the key is released (see CombatCheck's tab wheel)
@@ -106,12 +112,20 @@ class BaitFishingTask(FishingTask):
         win32api.SetCursorPos((int(abs_x), int(abs_y)))
 
     def equip(self, name):
-        # Tab is a hold-to-open wheel: hold it, point at the utility, release to select
+        for _ in range(3):
+            if self.pick_utility(name):
+                return
+            self.sleep(random.uniform(0.8, 1.2))
+        self.fail(f'could not pick {name} on the utility wheel')
+
+    def pick_utility(self, name):
+        # Tab is a hold-to-open wheel: hold it, point at the utility, release to select. The OCR of the counts on the
+        # wheel misses now and then, so only the hovered name in the centre is taken as proof.
         wheel_key = self.key_config.get('Wheel Key')
         self.send_key_down(wheel_key)
+        confirmed = False
         try:
-            if not self.wait_until(self.wheel_open, time_out=5):
-                self.fail('utility wheel did not open')
+            self.wait_until(self.wheel_open, time_out=2)
             self.sleep(random.uniform(0.3, 0.6))
             self.point_cursor(0.5, 0.5)       # the wheel reads the move from its centre, wherever the cursor was parked
             self.sleep(random.uniform(0.2, 0.4))
@@ -119,16 +133,17 @@ class BaitFishingTask(FishingTask):
                 self.point_cursor(*ui.UTILITY_SLOTS[name])
                 self.sleep(random.uniform(0.4, 0.8))
                 if self.hovering(name):
+                    confirmed = True
                     break
                 self.point_cursor(0.5, 0.5)
                 self.sleep(random.uniform(0.2, 0.4))
-            else:
-                self.log_info(f'the wheel never showed {name} under the cursor, releasing anyway')
         finally:
             self.send_key_up(wheel_key)
         self.sleep(random.uniform(0.4, 0.7))
-        if not self.wait_until(lambda: not self.wheel_open(), time_out=4):
-            self.fail('utility wheel did not close after picking ' + name)
+        self.wait_until(lambda: not self.wheel_open(), time_out=3)
+        if not confirmed:
+            self.log_info(f'the wheel never showed {name} under the cursor')
+        return confirmed
 
     def utility_count(self):
         for _ in range(5):
