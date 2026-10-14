@@ -1126,16 +1126,11 @@ class TestSellAll(unittest.TestCase):
         task.sell_all()
         self.assertEqual(['Sell All'], task.clicked_texts)
 
-    def test_never_confirms_the_request_dialog(self):
-        task = Seller([20, 8], ['Sell All', 'Request items for sale', 'Confirm', 'Dock Shop'])
+    def test_confirms_the_request_dialog_with_its_button(self):
+        task = Seller([20, 0], ['Sell All', 'Request items for sale', 'Dock Shop'])
         task.sell_all()
-        self.assertEqual(['Sell All'], task.clicked_texts)
-        self.assertIn(BaitFishingTask.REQUEST_DIALOG_CLOSE_AT, task.clicked)
-
-    def test_fails_when_nothing_sold_behind_the_request_dialog(self):
-        task = Seller([20, 20], ['Sell All', 'Request items for sale', 'Dock Shop'])
-        with self.assertRaises(Exception):
-            task.sell_all()
+        self.assertIn(BaitFishingTask.REQUEST_CONFIRM_AT, task.clicked)
+        self.assertEqual(['Sell All'], task.clicked_texts)    # the "Confirm" title is never OCR-clicked
 
     def test_opens_the_catch_list_when_the_shop_has_no_sell_all(self):
         task = Seller([20, 0], ['Dock Shop'])

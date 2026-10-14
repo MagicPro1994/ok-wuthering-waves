@@ -113,20 +113,18 @@ class BaitFishingTask(FishingTask):
         if not self.click_ocr_text(r'Sell\s*All'):
             self.fail('Sell All not found in the Dock Shop')
         self.sleep(1.2)
-        kept_for_requests = self.has_text(r'Request\s*items\s*for\s*sale')
-        if kept_for_requests:                               # fish on request are not for sale: never confirm
-            self.screenshot('sell_all_request_dialog')
-            self.click_at(*self.REQUEST_DIALOG_CLOSE_AT, after_sleep=1.2)
+        if self.has_text(r'Request\s*items\s*for\s*sale'):    # the dialog's Confirm button, not its "Confirm" title
+            self.click_at(*self.REQUEST_CONFIRM_AT, after_sleep=2.0)
         self.click_at(*self.REWARD_CLOSE_AT, after_sleep=1.5)    # close "Items Obtained"
         self.send_key('esc', after_sleep=1.2)
         if not self.wait_until(lambda: self.has_text(HUB_ANCHOR.pattern), time_out=8):
             self.fail('the Dock hub did not come back after Sell All')
         left = self.hub_cargo_used()
         self.log_info(f'sell all: cargo {left}/52 after the sale')
-        if left and (used is None or left >= used or not kept_for_requests):
+        if left:
             self.fail(f'cargo still holds {left} after Sell All')
 
-    REQUEST_DIALOG_CLOSE_AT = (0.756, 0.326)    # the X of the "Request items for sale. Continue?" dialog
+    REQUEST_CONFIRM_AT = (0.656, 0.628)    # Confirm of "You have selected Request items for sale. Continue?"
 
     SET_SAIL_AT = (0.83, 0.93)    # the Set Sail button of the sail screen (the options keep their last choice)
 
