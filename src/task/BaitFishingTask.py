@@ -221,6 +221,7 @@ class BaitFishingTask(FishingTask):
         self.sleep(random.uniform(0.6, 1.0))
         self.screenshot('cargo_screen')   # kept for measuring the card and grid geometry
         for _ in range(self.LOAD_PASSES):
+            self.clear_draft()      # a draft left on screen would end up in the base frames
             occupied = cg.occupied_cells(self.rgb_frame())
             catches = self.survey_catches()
             for catch in catches:
@@ -235,8 +236,18 @@ class BaitFishingTask(FishingTask):
             # a full list may hide more fish behind the visible cards: look again once the placed ones have left
             if not plan or len(catches) < cg.MAX_CARDS:
                 break
+        self.clear_draft()      # the survey leaves the last probed card's draft up
         if finish:
             self.click_at(*ui.FINISH_AT, after_sleep=random.uniform(1.0, 1.6))
+
+    def clear_draft(self):
+        # Q returns the drafted fish to the list (never 't': that trashes it)
+        for _ in range(3):
+            if not cg.draft_active(self.rgb_frame()):
+                return
+            self.send_key('q', after_sleep=0.6)
+        if cg.draft_active(self.rgb_frame()):
+            self.fail('could not clear the draft, Cargo screen left open')
 
     def cargo_used(self):
         return cg.parse_cargo_used(self.texts(*cg.CARGO_COUNT_BOX))
@@ -289,7 +300,11 @@ class BaitFishingTask(FishingTask):
         """
         # placed fish are part of the base and no draft may show in it: a confirm clears the draft, but right after
         # a survey the last probed card's draft is still up, so that first placement uses the survey's own base
-        base = self.clean_base if self.clean_base is not None else self.settled_frame()
+        if self.clean_base is None:
+            self.clear_draft()
+            base = self.settled_frame()
+        else:
+            base = self.clean_base
         self.clean_base = None
         occupied = cg.occupied_cells(base)
         self.click_at(*cg.card_center(catch.slot), after_sleep=random.uniform(0.6, 0.9))

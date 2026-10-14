@@ -89,6 +89,20 @@ def read_draft(before: np.ndarray, after: np.ndarray, occupied: Iterable[Cell]) 
     return frozenset(found)
 
 
+# The Space confirm button (a green check) only shows while a draft is up. Measured on real frames: about 17% of the box
+# has a greenish pixel with a draft and none without, so any cutoff in between works.
+CONFIRM_BOX_PX = (1495, 945, 1575, 1025)    # x0, y0, x1, y1 in 1920x1080 pixels
+CONFIRM_MIN = 0.04
+
+
+def draft_active(rgb: np.ndarray) -> bool:
+    x0, y0, x1, y1 = CONFIRM_BOX_PX
+    patch = rgb[y0:y1, x0:x1].astype(int)
+    r, g, b = patch[..., 0], patch[..., 1], patch[..., 2]
+    green = (g > 130) & (g - r > 25) & (g - b > 25)
+    return bool(green.mean() >= CONFIRM_MIN)
+
+
 def occupied_cells(rgb: np.ndarray, threshold: float = 18.0) -> FrozenSet[Cell]:
     empty = np.array(EMPTY_RGB, dtype=int)
     found = set()

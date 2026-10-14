@@ -375,6 +375,79 @@ class TestPlaceCatch(unittest.TestCase):
         self.assertEqual(want, task.placed)
 
 
+class DraftClearer(Surveyor):
+    """clear_draft with a scripted draft_active: `q` removes the draft unless `stuck`."""
+
+    def __init__(self, active, stuck=False):
+        super().__init__({})
+        self.active = active
+        self.stuck = stuck
+
+    def send_key(self, key, after_sleep=0.2, **kwargs):
+        super().send_key(key, after_sleep)
+        if key == 'q' and not self.stuck:
+            self.active = False
+
+
+class TestClearDraft(unittest.TestCase):
+    def setUp(self):
+        self.real_active = cg.draft_active
+
+    def tearDown(self):
+        cg.draft_active = self.real_active
+
+    def run_clear(self, task):
+        cg.draft_active = lambda frame: task.active
+        task.clear_draft()
+
+    def test_a_draft_is_returned_to_the_list_with_q(self):
+        task = DraftClearer(True)
+        self.run_clear(task)
+        self.assertEqual(['q'], task.keys)
+
+    def test_no_draft_presses_nothing(self):
+        task = DraftClearer(False)
+        self.run_clear(task)
+        self.assertEqual([], task.keys)
+
+    def test_fails_when_q_never_clears_it(self):
+        task = DraftClearer(True, stuck=True)
+        with self.assertRaises(Exception) as ctx:
+            self.run_clear(task)
+        self.assertIn('could not clear the draft', str(ctx.exception))
+        self.assertEqual(['q'] * 3, task.keys)
+        self.assertNotIn('t', task.keys)
+
+
+class TestDraftClearedAroundTheBoard(unittest.TestCase):
+    def test_load_cargo_clears_the_draft_at_every_pass_start_and_before_finish(self):
+        events = []
+
+        class Task(Loader):
+            def clear_draft(self):
+                events.append('clear')
+
+            def survey_catches(self):
+                events.append('survey')
+                return super().survey_catches()
+
+            def click_at(self, fx, fy, after_sleep=0.4):
+                super().click_at(fx, fy, after_sleep)
+                if (fx, fy) == ui.FINISH_AT:
+                    events.append('finish')
+
+        Task([two_catches()], [True, True]).load_cargo()
+        self.assertEqual(['clear', 'survey', 'clear', 'finish'], events)
+
+    def test_place_catch_clears_a_leftover_draft_before_taking_its_base(self):
+        task = Placer({0: [(2, 2)]})
+        cleared = []
+        task.clear_draft = lambda: cleared.append(task.events[:])
+        cells = frozenset({(2, 2)})
+        task.place_catch(Catch(0, cells, 5), Placement(0, cells, (2, 2)))
+        self.assertEqual([[]], cleared)         # before the first click
+
+
 class Loader(Placer):
     """load_cargo with scripted surveys; every pass returns the next list of catches."""
 

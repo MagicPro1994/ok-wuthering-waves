@@ -115,6 +115,12 @@ class TestReadDraft(unittest.TestCase):
         base = fixture("cargo_placed_base.png")
         self.assertEqual(12, len(cg.occupied_cells(base)))
 
+    def test_sunfish_over_placed_fish_including_the_blocked_corner(self):
+        base = fixture("cargo_placed_base.png")
+        after = fixture("cargo_draft_sunfish_over_placed.png")
+        self.assertEqual(frozenset({(0, 0), (0, 1), (1, 0), (1, 1), (1, 2), (1, 3)}),
+                         cg.read_draft(base, after, cg.occupied_cells(base)))
+
     def test_no_draft_reads_nothing(self):
         base = fixture("cargo_placed_base.png")
         self.assertEqual(frozenset(), cg.read_draft(base, base, cg.occupied_cells(base)))
@@ -128,6 +134,17 @@ class TestReadDraft(unittest.TestCase):
         base = fixture("cargo_empty.png")
         after = paint(base, [(0, 1), (1, 0)])
         self.assertNotIn((0, 0), cg.read_draft(base, after, frozenset()))
+
+
+class TestDraftActive(unittest.TestCase):
+    def test_no_confirm_button_without_a_draft(self):
+        for name in ("cargo_empty.png", "cargo_catches_base.png", "cargo_placed_base.png"):
+            self.assertFalse(cg.draft_active(fixture(name)), name)
+
+    def test_confirm_button_shows_with_a_draft(self):
+        for name in ("cargo_draft_snail.png", "cargo_draft_tripod.png", "cargo_draft_eel_over_placed.png",
+                     "cargo_draft_sunfish_over_placed.png"):
+            self.assertTrue(cg.draft_active(fixture(name)), name)
 
 
 class TestParseCargoUsed(unittest.TestCase):
