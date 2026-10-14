@@ -272,6 +272,7 @@ config = {
         ["src.task.ChangeEchoTask", "ChangeEchoTask"],
         ["src.task.GardenTask", "GardenTask"],
         ["src.task.FishingTask", "FishingTask"],
+        ["src.task.BaitFishingTask", "BaitFishingTask"],
         # ["src.task.DiagnosisTask", "DiagnosisTask"],
     ], 'trigger_tasks': [
         ["src.task.AutoCombatTask", "AutoCombatTask"],
