@@ -1000,3 +1000,63 @@ class TestBaitCount(unittest.TestCase):
         task = Counter([None, None])
         self.assertIsNone(task.bait_count())
         self.assertEqual(['utility_missed', 'utility_missed'], task.shots)
+
+
+class Puffer(BaitFishingTask):
+    class _Keys:
+        def get(self, key):
+            return 't'
+
+    key_config = _Keys()
+
+    def __init__(self, count, complete):
+        self.count, self.complete = count, complete
+        self.events = []
+
+    def info_set(self, *args, **kwargs):
+        pass
+
+    def equip(self, name):
+        self.events.append(('equip', name))
+
+    def utility_count(self):
+        return self.count
+
+    def send_key(self, key, after_sleep=0):
+        self.events.append(('key', key))
+
+    def wait_until(self, condition, time_out=10):
+        return self.complete
+
+    def click_at(self, fx, fy, after_sleep=0.4):
+        self.events.append(('click',))
+
+    def sleep(self, seconds):
+        pass
+
+    def log_info(self, message, notify=False, **kwargs):
+        self.events.append(('log', message))
+
+    def fail(self, message):
+        raise Exception(message)
+
+
+class TestSweetPuff(unittest.TestCase):
+    def test_an_empty_stock_takes_the_manual_path_without_pressing_the_tool_key(self):
+        task = Puffer(0, True)
+        self.assertFalse(task.try_sweet_puff())
+        self.assertNotIn(('key', 't'), task.events)
+
+    def test_an_unreadable_count_still_tries_the_puff(self):
+        task = Puffer(None, True)
+        self.assertTrue(task.try_sweet_puff())
+        self.assertIn(('key', 't'), task.events)
+
+    def test_an_unreadable_count_and_no_effect_falls_back_quietly(self):
+        task = Puffer(None, False)
+        self.assertFalse(task.try_sweet_puff())
+
+    def test_a_known_stock_with_no_effect_fails(self):
+        with self.assertRaises(Exception) as ctx:
+            Puffer(211, False).try_sweet_puff()
+        self.assertIn('Fishing Complete', str(ctx.exception))

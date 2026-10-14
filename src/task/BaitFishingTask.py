@@ -119,7 +119,7 @@ class BaitFishingTask(FishingTask):
             self.fail('utility wheel did not close after picking ' + name)
 
     def utility_count(self):
-        for _ in range(3):
+        for _ in range(5):
             count = parse_count(self.texts(*ui.COUNT_BOX))
             if count is not None:
                 return count
@@ -197,10 +197,15 @@ class BaitFishingTask(FishingTask):
     def try_sweet_puff(self):
         self.info_set('current task', 'sweet puff')
         self.equip('sweet_puff')
-        if not (self.utility_count() or 0) > 0:
-            return False
+        count = self.utility_count()
+        if count == 0:
+            return False                  # read as empty: take the manual path
+        # An unreadable count is not an empty stock (the small digits are easy to miss): try it and see.
         self.send_key(self.key_config.get('Tool Key'), after_sleep=random.uniform(0.8, 1.3))
         if not self.wait_until(lambda: self.has_text('Fishing Complete'), time_out=20):
+            if count is None:
+                self.log_info('Sweet Puff count unreadable and nothing happened, fishing normally')
+                return False
             self.fail('Fishing Complete did not show after using Sweet Puff')
         self.sleep(random.uniform(0.8, 1.4))
         self.click_at(*ui.FISHING_COMPLETE_CLOSE_AT, after_sleep=random.uniform(1.0, 1.6))
