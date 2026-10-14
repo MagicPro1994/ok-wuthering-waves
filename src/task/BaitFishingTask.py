@@ -259,7 +259,7 @@ class BaitFishingTask(FishingTask):
         return catches
 
     def place_catch(self, catch, placement):
-        """Place one catch by dragging its ghost; True when the Cargo counter rose, False when it did not (caller stops)."""
+        """Place one catch by dragging its ghost and confirming with Space; True when the Cargo counter rose, False when it did not (caller stops)."""
         self.click_at(*cg.card_center(catch.slot), after_sleep=random.uniform(0.6, 0.9))
         cells = cg.read_ghost(self.rgb_frame())
         # rotate by re-reading the ghost, never by counting presses: the rotation direction is the game's
@@ -285,6 +285,8 @@ class BaitFishingTask(FishingTask):
         if not self.wait_until(lambda: self.cargo_used() == want, time_out=self.PLACE_WAIT):
             self.log_info(f'slot {catch.slot}: the Cargo counter did not reach {want}, leaving it')
             return False
+        # the dropped fish is only a draft until Space confirms it (never 't': that trashes it)
+        self.send_key('space', after_sleep=random.uniform(0.6, 1.0))
         return True
 
     def release_selected_fish(self):

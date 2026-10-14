@@ -253,19 +253,29 @@ class Placer(Surveyor):
         self.drags = []
         self.rotations = None       # successive ghost shapes shown by `r`, if set
         self.real = self
+        self.events = []
+
+    def click_at(self, fx, fy, after_sleep=0.4):
+        super().click_at(fx, fy, after_sleep)
+        self.events.append('click')
 
     def texts(self, x=0, y=0, to_x=1, to_y=1):
         if (x, y, to_x, to_y) == cg.CARGO_COUNT_BOX:
+            if self.drags:
+                self.events.append('counter')
             return [f'Cargo: {self.used}/52']
         return super().texts(x, y, to_x, to_y)
 
     def send_key(self, key, after_sleep=0.2, **kwargs):
         super().send_key(key, after_sleep)
+        if key == 'space':
+            self.events.append('space')
         if key == 'r' and self.rotations:
             self.ghost = frozenset(self.rotations.pop(0))
 
     def drag(self, x0, y0, x1, y1, duration):
         self.drags.append(((x0, y0), (x1, y1)))
+        self.events.append('drag')
         if self.rise:
             self.used += len(self.ghost)
             self.ghost = frozenset()
@@ -282,7 +292,8 @@ class TestPlaceCatch(unittest.TestCase):
         self.assertTrue(task.place_catch(Catch(1, cells, 100), placement))
         self.assertEqual([(cg.cell_center(2, 2), cg.cell_center(4, 4))], task.drags)
         self.assertEqual(9, task.used)
-        self.assertNotIn('space', task.keys)
+        self.assertEqual(['space'], task.keys)
+        self.assertEqual(['click', 'drag', 'counter', 'space'], task.events)
 
     def test_a_ghost_already_on_target_is_still_dragged_a_little(self):
         cells = frozenset({(2, 2), (2, 3)})
@@ -301,7 +312,7 @@ class TestPlaceCatch(unittest.TestCase):
         task.rotations = [flat, upright]
         placement = Placement(0, frozenset({(5, 5), (6, 5)}), (5, 5))
         self.assertTrue(task.place_catch(Catch(1, frozenset(flat), 5), placement))
-        self.assertEqual(['r', 'r'], task.keys)
+        self.assertEqual(['r', 'r', 'space'], task.keys)
         self.assertEqual(cg.cell_center(2, 2), task.drags[0][0])
 
     def test_returns_false_when_the_counter_does_not_rise(self):
@@ -310,6 +321,7 @@ class TestPlaceCatch(unittest.TestCase):
         placement = Placement(0, frozenset({(4, 4), (4, 5)}), (4, 4))
         self.assertFalse(task.place_catch(Catch(1, cells, 100), placement))
         self.assertTrue(any('counter' in n for n in task.notes))
+        self.assertNotIn('space', task.keys)
 
     def test_returns_false_when_it_cannot_rotate_to_the_shape(self):
         task = Placer({1: [(2, 2), (2, 3)]})
