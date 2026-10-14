@@ -41,11 +41,21 @@ def entry_selected(boxes: Sequence[Tuple[str, float]], pattern: str) -> Optional
     `boxes` are OCR (text, y centre) pairs of the prompt list in fractions of the frame height.
     """
     regex = re.compile(pattern, re.IGNORECASE)
-    rows = [y for text, y in boxes if regex.search(text.strip())]
-    if not rows:
+    # the OCR sometimes merges the key badge into the row: "[F] Fish", "F Fish"
+    found = None
+    for text, y in boxes:
+        text = text.strip()
+        badge = re.match(r'\[?F\]?\s*', text, re.IGNORECASE)
+        rest = text[badge.end():] if badge else text
+        if badge and badge.end() and regex.search(rest):
+            return True
+        if found is None and regex.search(text):
+            found = y
+    if found is None:
         return None
-    keys = [y for text, y in boxes if text.strip().strip('[]').upper() == 'F']
-    return any(abs(key - rows[0]) < 0.025 for key in keys)
+    y = found
+    keys = [ky for kt, ky in boxes if kt.strip().strip('[]').upper() == 'F']
+    return any(abs(key - y) < 0.025 for key in keys)
 
 
 class RoundGuard:

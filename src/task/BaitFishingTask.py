@@ -8,7 +8,7 @@ from src.fishing.bait_logic import (RoundGuard, dialog_open, entry_selected, par
                                     sandworm_launched)
 from src.fishing.cargo_plan import Catch, grab_and_drop, plan_cargo, shape_matches
 from src.fishing.real_input import RealInput
-from src.task.FishingTask import FishingTask
+from src.task.FishingTask import HUB_ANCHOR, FishingTask
 from src.task.WWOneTimeTask import WWOneTimeTask
 
 logger = Logger.get_logger(__name__)
@@ -19,7 +19,7 @@ class BaitFishingTask(FishingTask):
         super().__init__(*args, **kwargs)
         self.name = "🎣 Bait Fishing (Sandworm)"
         self.description = ("Riccioli Islands: launch Sandworm bait near the dock, catch the fish, load the cargo, "
-                            "sell all and repeat until the bait runs out. Start in the open world or on the boat. "
+                            "sell all and repeat until the bait runs out. Start in the open world or on the boat near the dock. "
                             "Needs an elevated run.")
         self.default_config.pop('Max Sail Minutes', None)
         self.default_config.update({'Max Rounds': 0})   # 0 = until the bait runs out
@@ -66,8 +66,21 @@ class BaitFishingTask(FishingTask):
         self.load_cargo()
         self.return_to_dock()
         self.send_key('f', after_sleep=random.uniform(1.8, 2.6))   # opens the Dock hub
+        self.wait_ocr(match=HUB_ANCHOR, time_out=20, raise_if_not_found=True, settle_time=0.8)
         self.sell_all()
-        self.prepare_and_sail()
+        self.set_sail()
+
+    SET_SAIL_AT = (0.83, 0.93)    # the Set Sail button of the sail screen (the options keep their last choice)
+
+    def set_sail(self):
+        # Later rounds: the Night and durability options are already set from the first sail, only confirm.
+        if not self.wait_until(lambda: self.has_text(r'Set\s*Sail'), time_out=10):
+            self.fail('Set Sail did not show in the Dock hub')
+        if not self.click_ocr_text('Set Sail'):
+            self.fail('could not click Set Sail in the Dock hub')
+        self.sleep(1.5)
+        self.click_at(*self.SET_SAIL_AT)
+        self.sleep(random.uniform(4.0, 6.0))
 
     # ---- utilities -----------------------------------------------------
 
@@ -105,17 +118,23 @@ class BaitFishingTask(FishingTask):
         self.fail(f'{label}: not reached after {tries} presses of {key}')
 
     def select_entry(self, pattern, label):
-        # The prompt list starts on its first entry; scroll until the wanted entry carries the F key badge.
-        for _ in range(4):
+        # The prompt list starts on its first entry; scroll until the wanted entry carries the F key badge. A
+        # missing entry is first taken for an OCR miss, so look again before giving up.
+        tries = 5
+        selected = None
+        for attempt in range(tries):
             boxes = [(box.name, (box.y + box.height / 2) / self.height)
                      for box in (self.ocr(*ui.PROMPT_BOX) or [])]
             selected = entry_selected(boxes, pattern)
             if selected:
                 return
             if selected is None:
-                self.fail(f'{label} entry not found in the prompt list')
-            self.scroll_relative(*ui.PROMPT_SCROLL_AT, ui.SCROLL_DOWN)
-            self.sleep(random.uniform(0.3, 0.6))
+                self.sleep(random.uniform(0.4, 0.8))
+            elif attempt < tries - 1:
+                self.scroll_relative(*ui.PROMPT_SCROLL_AT, ui.SCROLL_DOWN)
+                self.sleep(random.uniform(0.3, 0.6))
+        if selected is None:
+            self.fail(f'{label} entry not found in the prompt list')
         self.fail(f'could not select the {label} entry')
 
     def clear_dock_prompt(self):
@@ -175,8 +194,12 @@ class BaitFishingTask(FishingTask):
         catches = self.survey_catches(base)
         plan = plan_cargo(cg.free_cells(occupied), catches)
         self.log_info(f'cargo: {len(plan)} of {len(catches)} catches placed')
+        placed = set()
         for catch, placement in plan:
-            self.place_catch(catch, placement)
+            if not self.place_catch(catch, placement, base, placed):
+                self.log_info(f'cargo: slot {catch.slot} was not placed, leaving the rest as they are')
+                break
+            placed |= placement.cells
         self.click_at(*ui.FINISH_AT, after_sleep=random.uniform(1.0, 1.6))
 
     def survey_catches(self, base):
@@ -195,7 +218,12 @@ class BaitFishingTask(FishingTask):
             catches.append(Catch(slot, cells, value))
         return catches
 
-    def place_catch(self, catch, placement):
+    def place_catch(self, catch, placement, survey_base=None, placed=frozenset()):
+        """Place one catch; True when it was placed, False when it was left (the caller stops placing)."""
+        if survey_base is not None:
+            stray = cg.read_preview(survey_base, self.rgb_frame()) - frozenset(placed)
+            if stray:
+                self.log_info(f'slot {catch.slot}: a preview from an earlier card is still showing: {sorted(stray)}')
         # a fresh base for every card: earlier placements are part of the cargo now and must not read as preview
         base = self.rgb_frame()
         self.click_at(*cg.card_center(catch.slot), after_sleep=random.uniform(0.6, 0.9))
@@ -208,7 +236,7 @@ class BaitFishingTask(FishingTask):
             cells = cg.read_preview(base, self.rgb_frame())
         else:
             self.log_info(f'slot {catch.slot}: could not rotate to the planned shape, leaving it')
-            return
+            return False
         if cells != placement.cells:
             grab, drop = grab_and_drop(cells, placement)
             src, dst = cg.cell_center(*grab), cg.cell_center(*drop)
@@ -216,8 +244,9 @@ class BaitFishingTask(FishingTask):
             self.sleep(random.uniform(0.5, 0.8))
             if cg.read_preview(base, self.rgb_frame()) != placement.cells:
                 self.log_info(f'slot {catch.slot}: preview did not land on the planned cells, leaving it')
-                return
+                return False
         self.send_key('space', after_sleep=random.uniform(0.5, 0.9))
+        return True
 
     def release_selected_fish(self):
         # `FishingTask.sell_all` calls this when Sell All refuses because a fish is still selected. After

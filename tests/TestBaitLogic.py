@@ -58,6 +58,18 @@ class TestEntrySelected(unittest.TestCase):
     def test_missing_entry_is_none(self):
         self.assertIsNone(entry_selected([("F", 0.5)], r"^Fish$"))
 
+    def test_merged_badge_counts_as_selected(self):
+        self.assertTrue(entry_selected([("[F] Fish", 0.6), ("Return to the dock", 0.54)], r"(?<![A-Za-z])Fish(?![A-Za-z])"))
+        self.assertTrue(entry_selected([("F Fish", 0.6)], r"^Fish$"))
+        self.assertTrue(entry_selected([("[F] Return to the dock", 0.54), ("Fish", 0.6)], r"return\s+to\s+the\s+dock"))
+
+    def test_merged_row_does_not_select_the_other_row(self):
+        boxes = [("[F] Fish", 0.6), ("Return to the dock", 0.54)]
+        self.assertFalse(entry_selected(boxes, r"Return to the dock"))
+
+    def test_plain_fish_row_is_not_mistaken_for_a_badge(self):
+        self.assertFalse(entry_selected([("Fish", 0.6)], r"^Fish$"))
+
 
 class TestRoundGuard(unittest.TestCase):
     def test_a_drop_resets_the_stalls(self):

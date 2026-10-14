@@ -1,8 +1,9 @@
+import types
 import unittest
 
 import numpy as np
 
-from src.fishing import cargo_grid as cg
+from src.fishing import bait_ui as ui, cargo_grid as cg
 from src.fishing.cargo_packer import Placement
 from src.fishing.cargo_plan import Catch
 from src.task.BaitFishingTask import BaitFishingTask
@@ -217,3 +218,132 @@ class TestSurveyValue(unittest.TestCase):
         catches = task.survey_catches(np.full((1080, 1920, 3), 52, np.uint8))
         self.assertEqual(0, catches[0].value)
         self.assertTrue(any('value' in n for n in task.notes))
+
+
+class TestPlaceCatchResult(unittest.TestCase):
+    def test_returns_true_when_placed(self):
+        task = Placer({1: [(2, 2), (2, 3)]})
+        cells = frozenset({(2, 2), (2, 3)})
+        self.assertTrue(task.place_catch(Catch(1, cells, 5), Placement(0, cells, (2, 2))))
+
+    def test_returns_false_when_it_cannot_rotate_to_the_shape(self):
+        task = Placer({1: [(2, 2), (2, 3)]})
+        want = frozenset({(2, 2), (3, 2), (4, 2)})
+        self.assertFalse(task.place_catch(Catch(1, frozenset({(2, 2), (2, 3)}), 5), Placement(0, want, (2, 2))))
+        self.assertNotIn('space', task.keys)
+
+    def test_logs_a_stray_preview_from_an_earlier_card(self):
+        task = Placer({0: [(2, 2)], 1: [(5, 5)]})
+        survey_base = np.full((1080, 1920, 3), 52, np.uint8)
+        task.current = 0                     # card 0 is still previewing
+        cells = frozenset({(5, 5)})
+        task.place_catch(Catch(1, cells, 5), Placement(0, cells, (5, 5)), survey_base)
+        self.assertTrue(any('earlier card' in n for n in task.notes))
+
+
+class Loader(Placer):
+    def __init__(self, shapes, results):
+        super().__init__(shapes)
+        self.results = list(results)
+        self.tried = []
+
+    def cargo_screen_open(self):
+        return True
+
+    def wait_until(self, condition, time_out=10, **kwargs):
+        return condition()
+
+    def info_set(self, key, value):
+        pass
+
+    def survey_catches(self, base):
+        return [Catch(0, frozenset({(2, 2)}), 100), Catch(1, frozenset({(5, 5)}), 200)]
+
+    def place_catch(self, catch, placement, survey_base=None, placed=frozenset()):
+        self.tried.append(catch.slot)
+        return self.results.pop(0)
+
+
+class TestLoadCargo(unittest.TestCase):
+    def test_stops_after_the_first_unplaced_catch_but_still_finishes(self):
+        task = Loader({}, [False, True])
+        task.load_cargo()
+        self.assertEqual([1], task.tried)
+        self.assertTrue(any('not placed' in n for n in task.notes))
+        self.assertEqual(ui.FINISH_AT, task.clicked[-1])
+
+    def test_places_everything_when_all_succeed(self):
+        task = Loader({}, [True, True])
+        task.load_cargo()
+        self.assertEqual([1, 0], task.tried)
+        self.assertEqual(ui.FINISH_AT, task.clicked[-1])
+
+
+class Prompter(BaitFishingTask):
+    height = 1080
+
+    def __init__(self, screens):
+        self.screens = list(screens)      # per ocr call: list of (text, y)
+        self.scrolls = 0
+        self.failed = None
+
+    def ocr(self, *args, **kwargs):
+        rows = self.screens.pop(0) if len(self.screens) > 1 else self.screens[0]
+        return [types.SimpleNamespace(name=t, y=y * 1080 - 10, height=20) for t, y in rows]
+
+    def scroll_relative(self, *args):
+        self.scrolls += 1
+
+    def sleep(self, seconds):
+        pass
+
+    def fail(self, message):
+        self.failed = message
+        raise Exception(message)
+
+
+class TestSelectEntry(unittest.TestCase):
+    def test_retries_when_the_entry_is_missing_once(self):
+        task = Prompter([[("junk", 0.5)], [("F", 0.6), ("Fish", 0.6)]])
+        task.select_entry(r'^Fish$', 'Fish')
+        self.assertEqual(0, task.scrolls)
+
+    def test_scrolls_until_selected_and_uses_the_fifth_check(self):
+        not_selected = [("Fish", 0.6), ("Return to the dock", 0.5)]
+        selected = [("Fish", 0.6), ("F", 0.6)]
+        task = Prompter([not_selected] * 4 + [selected])
+        task.select_entry(r'^Fish$', 'Fish')
+        self.assertEqual(4, task.scrolls)
+
+    def test_fails_after_bounded_tries(self):
+        task = Prompter([[("junk", 0.5)]])
+        with self.assertRaises(Exception):
+            task.select_entry(r'^Fish$', 'Fish')
+        self.assertIn('not found', task.failed)
+
+    def test_merged_badge_is_selected(self):
+        task = Prompter([[("[F] Fish", 0.6)]])
+        task.select_entry(r'^Fish$', 'Fish')
+
+
+class TestSetSail(unittest.TestCase):
+    def make(self, shows, clicks_ok=True):
+        task = Surveyor({})
+        task.has_text = lambda *a, **k: shows
+        task.wait_until = lambda cond, time_out=10, **k: cond()
+        task.click_ocr_text = lambda *a, **k: clicks_ok
+        task.fail = lambda m: (_ for _ in ()).throw(Exception(m))
+        return task
+
+    def test_clicks_only_the_final_button(self):
+        task = self.make(True)
+        task.set_sail()
+        self.assertEqual([BaitFishingTask.SET_SAIL_AT], task.clicked)
+
+    def test_fails_when_set_sail_never_shows(self):
+        with self.assertRaises(Exception):
+            self.make(False).set_sail()
+
+    def test_fails_when_the_click_misses(self):
+        with self.assertRaises(Exception):
+            self.make(True, clicks_ok=False).set_sail()
