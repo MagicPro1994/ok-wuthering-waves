@@ -138,158 +138,256 @@ class TestCatchFish(unittest.TestCase):
 
 
 class Surveyor(BaitFishingTask):
-    def __init__(self, shapes):
-        self.shapes = shapes          # slot -> list of cells (a missing slot has no preview)
+    """A Catches screen: `shapes` maps slot -> cells, `values` slot -> value text.
+
+    Clicking a slot with a card shows that fish as a ghost on the grid; clicking a slot without one leaves the ghost.
+    """
+
+    def __init__(self, shapes, values=None):
+        self.shapes = dict(shapes)
+        self.values = values if values is not None else {slot: 1200 for slot in shapes}
         self.clicked = []
-        self.current = None
+        self.ghost = frozenset()
+        self.notes = []
+        self.keys = []
 
     def screenshot(self, name=None, **kwargs):
         pass
 
+    def info_set(self, key, value):
+        pass
+
+    def log_info(self, message, notify=False, **kwargs):
+        self.notes.append(message)
+
+    def fail(self, message):
+        raise Exception(message)
+
+    def slot_at(self, fx, fy):
+        slots = [cg.card_center(s) for s in range(cg.MAX_CARDS)]
+        return min(range(cg.MAX_CARDS), key=lambda s: abs(slots[s][0] - fx) + abs(slots[s][1] - fy))
+
     def click_at(self, fx, fy, after_sleep=0.4):
         self.clicked.append((fx, fy))
-        slots = [cg.card_center(s) for s in range(cg.MAX_CARDS)]
-        self.current = min(range(cg.MAX_CARDS), key=lambda s: abs(slots[s][0] - fx) + abs(slots[s][1] - fy))
+        slot = self.slot_at(fx, fy)
+        if slot in self.shapes:
+            self.ghost = frozenset(self.shapes[slot])
 
     def rgb_frame(self):
         frame = np.full((1080, 1920, 3), 52, np.uint8)
-        for r, c in self.shapes.get(self.current, []):
-            x, y = cg.cell_center(r, c)
-            frame[int(y * 1080) - 30:int(y * 1080) + 30, int(x * 1920) - 30:int(x * 1920) + 30] = (90, 160, 230)
+        for r, c in self.ghost:
+            x0 = int(cg.GRID_ORIGIN[0] + c * cg.CELL_PX)
+            y0 = int(cg.GRID_ORIGIN[1] + r * cg.CELL_PX)
+            frame[y0 + 3:y0 + 7, x0 + 3:x0 + 108] = 245     # a stretch of the dashed outline
         return frame
 
     def texts(self, x=0, y=0, to_x=1, to_y=1):
-        return ["1,200"]
+        for slot, value in self.values.items():
+            if (x, y, to_x, to_y) == cg.card_box(slot):
+                return [f'{value:,}']
+        return []
+
+    def send_key(self, key, after_sleep=0.2, **kwargs):
+        self.keys.append(key)
 
     def sleep(self, seconds):
         pass
 
 
 class TestSurvey(unittest.TestCase):
-    def test_reads_shapes_and_stops_at_the_first_empty_slot(self):
+    def test_reads_shapes_and_values_and_stops_at_the_first_empty_slot(self):
         shapes = {0: [(2, 2), (2, 3)], 1: [(3, 3), (4, 3), (4, 4)]}
         task = Surveyor(shapes)
-        base = np.full((1080, 1920, 3), 52, np.uint8)
-        catches = task.survey_catches(base)
+        catches = task.survey_catches()
         self.assertEqual([0, 1], [c.slot for c in catches])
         self.assertEqual(frozenset({(2, 2), (2, 3)}), catches[0].cells)
         self.assertEqual(1200, catches[0].value)
-        self.assertEqual(3, len(task.clicked))     # slot 2 was probed and found empty
+        self.assertEqual(3, len(task.clicked))     # slot 2 was probed: no value, the ghost is still slot 1's
 
+    def test_stops_at_a_slot_with_no_value_and_no_ghost(self):
+        task = Surveyor({})
+        self.assertEqual([], task.survey_catches())
+        self.assertEqual(1, len(task.clicked))
 
-class Placer(Surveyor):
-    """Cards preview their shape when clicked; `space` commits the preview to the cargo for good."""
+    def test_a_full_list_reads_every_slot(self):
+        shapes = {s: [(s, 1)] for s in range(cg.MAX_CARDS)}
+        self.assertEqual(cg.MAX_CARDS, len(Surveyor(shapes).survey_catches()))
 
-    def __init__(self, shapes):
-        super().__init__(shapes)
-        self.placed = set()
-        self.keys = []
-        self.notes = []
+    def test_fails_when_a_value_is_read_but_no_ghost_shows(self):
+        # slot 1 shows a value, but clicking it puts no ghost on the grid
+        task = Surveyor({0: [(2, 2)]}, values={0: 100, 1: 250})
+        original = task.click_at
 
-    def rgb_frame(self):
-        frame = super().rgb_frame()
-        for r, c in self.placed:
-            x, y = cg.cell_center(r, c)
-            frame[int(y * 1080) - 30:int(y * 1080) + 30, int(x * 1920) - 30:int(x * 1920) + 30] = (90, 160, 230)
-        return frame
+        def click(fx, fy, after_sleep=0.4):
+            original(fx, fy, after_sleep)
+            if task.slot_at(fx, fy) == 1:
+                task.ghost = frozenset()
 
-    def send_key(self, key, after_sleep=0.2, **kwargs):
-        self.keys.append(key)
-        if key == 'space':
-            self.placed |= set(self.shapes[self.current])
-            self.current = None
+        task.click_at = click
+        with self.assertRaises(Exception) as ctx:
+            task.survey_catches()
+        self.assertIn('slot 1', str(ctx.exception))
 
-    def log_info(self, message, notify=False, **kwargs):
-        self.notes.append(message)
-
-
-class TestPlaceCatch(unittest.TestCase):
-    def test_second_catch_is_placed_after_the_first(self):
-        shapes = {1: [(2, 2), (2, 3)], 0: [(5, 5), (6, 5)]}
-        task = Placer(shapes)
-        for slot in (1, 0):
-            cells = frozenset(shapes[slot])
-            task.place_catch(Catch(slot, cells, 100), Placement(0, cells, min(cells)))
-        self.assertEqual(['space', 'space'], task.keys)
-        self.assertEqual({(2, 2), (2, 3), (5, 5), (6, 5)}, task.placed)
+    def test_fails_when_the_first_card_has_a_value_but_no_ghost(self):
+        task = Surveyor({}, values={0: 100})
+        with self.assertRaises(Exception) as ctx:
+            task.survey_catches()
+        self.assertIn('slot 0', str(ctx.exception))
 
 
 class TestSurveyValue(unittest.TestCase):
-    def test_unreadable_value_is_logged_and_kept_at_zero(self):
-        task = Placer({0: [(2, 2)]})
-        task.texts = lambda *a, **k: ['??']
-        catches = task.survey_catches(np.full((1080, 1920, 3), 52, np.uint8))
-        self.assertEqual(0, catches[0].value)
+    def test_unreadable_value_with_a_new_ghost_uses_the_cell_count(self):
+        task = Surveyor({0: [(2, 2), (2, 3)]}, values={})
+        catches = task.survey_catches()
+        self.assertEqual(2, catches[0].value)
         self.assertTrue(any('value' in n for n in task.notes))
 
 
-class TestPlaceCatchResult(unittest.TestCase):
-    def test_returns_true_when_placed(self):
-        task = Placer({1: [(2, 2), (2, 3)]})
+class Placer(Surveyor):
+    """Dragging the ghost places the fish: the card leaves the list and the Cargo counter rises."""
+
+    def __init__(self, shapes, values=None, rise=True):
+        super().__init__(shapes, values)
+        self.used = 7
+        self.rise = rise
+        self.drags = []
+        self.rotations = None       # successive ghost shapes shown by `r`, if set
+        self.real = self
+
+    def texts(self, x=0, y=0, to_x=1, to_y=1):
+        if (x, y, to_x, to_y) == cg.CARGO_COUNT_BOX:
+            return [f'Cargo: {self.used}/52']
+        return super().texts(x, y, to_x, to_y)
+
+    def send_key(self, key, after_sleep=0.2, **kwargs):
+        super().send_key(key, after_sleep)
+        if key == 'r' and self.rotations:
+            self.ghost = frozenset(self.rotations.pop(0))
+
+    def drag(self, x0, y0, x1, y1, duration):
+        self.drags.append(((x0, y0), (x1, y1)))
+        if self.rise:
+            self.used += len(self.ghost)
+            self.ghost = frozenset()
+
+    def wait_until(self, condition, time_out=10, **kwargs):
+        return condition()
+
+
+class TestPlaceCatch(unittest.TestCase):
+    def test_drags_the_ghost_onto_the_plan_and_verifies_the_counter(self):
         cells = frozenset({(2, 2), (2, 3)})
-        self.assertTrue(task.place_catch(Catch(1, cells, 5), Placement(0, cells, (2, 2))))
+        task = Placer({1: sorted(cells)})
+        placement = Placement(0, frozenset({(4, 4), (4, 5)}), (4, 4))
+        self.assertTrue(task.place_catch(Catch(1, cells, 100), placement))
+        self.assertEqual([(cg.cell_center(2, 2), cg.cell_center(4, 4))], task.drags)
+        self.assertEqual(9, task.used)
+        self.assertNotIn('space', task.keys)
+
+    def test_a_ghost_already_on_target_is_still_dragged_a_little(self):
+        cells = frozenset({(2, 2), (2, 3)})
+        task = Placer({0: sorted(cells)})
+        self.assertTrue(task.place_catch(Catch(0, cells, 100), Placement(0, cells, (2, 2))))
+        (src, dst), = task.drags
+        self.assertEqual(src, cg.cell_center(2, 2))
+        self.assertNotEqual(src, dst)
+        self.assertAlmostEqual(src[1], dst[1])
+        self.assertLess(abs(dst[0] - src[0]) * 1920, cg.CELL_PX / 2)
+
+    def test_rotates_by_reading_the_ghost_again(self):
+        flat = [(2, 2), (2, 3)]
+        upright = [(2, 2), (3, 2)]
+        task = Placer({1: flat})
+        task.rotations = [flat, upright]
+        placement = Placement(0, frozenset({(5, 5), (6, 5)}), (5, 5))
+        self.assertTrue(task.place_catch(Catch(1, frozenset(flat), 5), placement))
+        self.assertEqual(['r', 'r'], task.keys)
+        self.assertEqual(cg.cell_center(2, 2), task.drags[0][0])
+
+    def test_returns_false_when_the_counter_does_not_rise(self):
+        cells = frozenset({(2, 2), (2, 3)})
+        task = Placer({1: sorted(cells)}, rise=False)
+        placement = Placement(0, frozenset({(4, 4), (4, 5)}), (4, 4))
+        self.assertFalse(task.place_catch(Catch(1, cells, 100), placement))
+        self.assertTrue(any('counter' in n for n in task.notes))
 
     def test_returns_false_when_it_cannot_rotate_to_the_shape(self):
         task = Placer({1: [(2, 2), (2, 3)]})
         want = frozenset({(2, 2), (3, 2), (4, 2)})
         self.assertFalse(task.place_catch(Catch(1, frozenset({(2, 2), (2, 3)}), 5), Placement(0, want, (2, 2))))
-        self.assertNotIn('space', task.keys)
-
-    def test_logs_a_stray_preview_from_an_earlier_card(self):
-        task = Placer({0: [(2, 2)], 1: [(5, 5)]})
-        survey_base = np.full((1080, 1920, 3), 52, np.uint8)
-        task.current = 0                     # card 0 is still previewing
-        cells = frozenset({(5, 5)})
-        task.place_catch(Catch(1, cells, 5), Placement(0, cells, (5, 5)), survey_base)
-        self.assertTrue(any('earlier card' in n for n in task.notes))
+        self.assertEqual(['r'] * 4, task.keys)
+        self.assertEqual([], task.drags)
 
 
 class Loader(Placer):
-    def __init__(self, shapes, results):
-        super().__init__(shapes)
+    """load_cargo with scripted surveys; every pass returns the next list of catches."""
+
+    def __init__(self, surveys, results):
+        super().__init__({})
+        self.surveys = list(surveys)
         self.results = list(results)
         self.tried = []
 
     def cargo_screen_open(self):
         return True
 
-    def wait_until(self, condition, time_out=10, **kwargs):
-        return condition()
+    def survey_catches(self):
+        return self.surveys.pop(0)
 
-    def info_set(self, key, value):
-        pass
-
-    def screenshot(self, name=None, **kwargs):
-        pass
-
-    def calibrate_cards(self):
-        pass
-
-    def fail(self, message):
-        raise Exception(message)
-
-    def survey_catches(self, base):
-        return [Catch(0, frozenset({(2, 2)}), 100), Catch(1, frozenset({(5, 5)}), 200)]
-
-    def place_catch(self, catch, placement, survey_base=None, placed=frozenset()):
+    def place_catch(self, catch, placement):
         self.tried.append(catch.slot)
         return self.results.pop(0)
 
 
+def two_catches():
+    return [Catch(0, frozenset({(2, 2)}), 100), Catch(1, frozenset({(5, 5)}), 200)]
+
+
+def full_list():
+    return [Catch(s, frozenset({(s, s + 1)}), 100 + s) for s in range(cg.MAX_CARDS)]
+
+
 class TestLoadCargo(unittest.TestCase):
     def test_fails_without_finishing_when_a_catch_cannot_be_placed(self):
-        task = Loader({}, [False, True])
+        task = Loader([two_catches()], [False, True])
         with self.assertRaises(Exception) as ctx:
             task.load_cargo()
         self.assertIn('Finish not pressed', str(ctx.exception))
         self.assertEqual([1], task.tried)
         self.assertNotIn(ui.FINISH_AT, task.clicked)
 
-    def test_places_everything_when_all_succeed(self):
-        task = Loader({}, [True, True])
+    def test_places_everything_when_all_succeed_in_one_pass(self):
+        task = Loader([two_catches()], [True, True])
         task.load_cargo()
         self.assertEqual([1, 0], task.tried)
         self.assertEqual(ui.FINISH_AT, task.clicked[-1])
+        self.assertEqual([], task.surveys)
+
+    def test_a_full_list_gets_another_pass_until_it_runs_short(self):
+        task = Loader([full_list(), two_catches(), two_catches()], [True] * 20)
+        task.load_cargo()
+        self.assertEqual(1, len(task.surveys))      # the third survey was never needed
+        self.assertEqual(ui.FINISH_AT, task.clicked[-1])
+
+    def test_a_full_list_that_fits_nothing_is_not_surveyed_again(self):
+        every = frozenset((r, c) for r in range(7) for c in range(8))
+        task = Loader([[Catch(s, every, 1) for s in range(cg.MAX_CARDS)], two_catches()], [])
+        task.load_cargo()
+        self.assertEqual([], task.tried)
+        self.assertEqual(1, len(task.surveys))
+        self.assertEqual(ui.FINISH_AT, task.clicked[-1])
+
+    def test_passes_are_bounded(self):
+        task = Loader([full_list() for _ in range(10)], [True] * 100)
+        task.load_cargo()
+        self.assertEqual(10 - task.LOAD_PASSES, len(task.surveys))
+
+    def test_failure_in_a_later_pass_does_not_finish(self):
+        task = Loader([full_list(), two_catches()], [True] * cg.MAX_CARDS + [True, False])
+        with self.assertRaises(Exception) as ctx:
+            task.load_cargo()
+        self.assertIn('Finish not pressed', str(ctx.exception))
+        self.assertNotIn(ui.FINISH_AT, task.clicked)
 
 
 class Prompter(BaitFishingTask):

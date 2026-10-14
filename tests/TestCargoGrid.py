@@ -83,17 +83,57 @@ class TestCards(unittest.TestCase):
         self.assertTrue(x0 < x < x1 and y0 < y < y1)
 
 
-class TestCalibrate(unittest.TestCase):
-    def test_slot_zero_comes_from_the_top_left_value(self):
-        values = [("1404", 940.0, 400.0), ("4196", 400.0, 400.0), ("2451", 400.0, 602.0), ("New", 700.0, 300.0)]
-        self.assertEqual((460.0, 328.0), cg.calibrate_card_origin(values))
+def ghost(img, cells):
+    """Draw the game's ghost: a dashed near-white square outline (inset 4 px, 3 px thick, 10 px dash / 6 px gap) per cell."""
+    out = img.copy()
+    for r, c in cells:
+        x0 = int(cg.GRID_ORIGIN[0] + c * cg.CELL_PX) + 4
+        y0 = int(cg.GRID_ORIGIN[1] + r * cg.CELL_PX) + 4
+        x1 = int(cg.GRID_ORIGIN[0] + (c + 1) * cg.CELL_PX) - 4
+        y1 = int(cg.GRID_ORIGIN[1] + (r + 1) * cg.CELL_PX) - 4
+        for t in range(3):
+            for i in range(0, x1 - x0, 16):
+                out[y0 + t, x0 + i:min(x0 + i + 10, x1)] = (245, 245, 245)
+                out[y1 - t, x0 + i:min(x0 + i + 10, x1)] = (245, 245, 245)
+            for i in range(0, y1 - y0, 16):
+                out[y0 + i:min(y0 + i + 10, y1), x0 + t] = (245, 245, 245)
+                out[y0 + i:min(y0 + i + 10, y1), x1 - t] = (245, 245, 245)
+    return out
 
-    def test_no_values_is_none(self):
-        self.assertIsNone(cg.calibrate_card_origin([("Catches", 100.0, 50.0)]))
 
-    def test_origin_moves_every_slot(self):
-        x0, y0 = cg.card_center(0, (460.0, 328.0))
-        x4, y4 = cg.card_center(4, (460.0, 328.0))
-        self.assertAlmostEqual((460.0 + cg.CARD_PITCH[0]) / 1920, x4)
-        self.assertAlmostEqual((328.0 + cg.CARD_PITCH[1]) / 1080, y4)
-        self.assertAlmostEqual(460.0 / 1920, x0)
+class TestGhost(unittest.TestCase):
+    def test_empty_cargo_has_no_ghost(self):
+        self.assertEqual(frozenset(), cg.read_ghost(fixture("cargo_empty.png")))
+
+    def test_reads_the_cells_of_a_drawn_ghost(self):
+        cells = [(2, 2), (3, 2), (4, 2), (4, 3)]
+        self.assertEqual(frozenset(cells), cg.read_ghost(ghost(fixture("cargo_empty.png"), cells)))
+
+    def test_reads_ghost_cells_over_filled_cells(self):
+        img = paint(fixture("cargo_empty.png"), [(1, 1), (1, 2)], (160, 100, 180))
+        for r, c in [(1, 1), (1, 2)]:
+            x0 = int(cg.GRID_ORIGIN[0] + c * cg.CELL_PX)
+            y0 = int(cg.GRID_ORIGIN[1] + r * cg.CELL_PX)
+            img[y0 + 2:y0 + 108, x0 + 2:x0 + 108] = (160, 100, 180)
+        cells = [(1, 1), (1, 2), (1, 3)]
+        self.assertEqual(frozenset(cells), cg.read_ghost(ghost(img, cells)))
+
+    def test_ignores_blocked_cells(self):
+        self.assertEqual(frozenset(), cg.read_ghost(ghost(fixture("cargo_empty.png"), [(0, 0)])))
+
+
+class TestParseCargoUsed(unittest.TestCase):
+    def test_cases(self):
+        self.assertEqual(7, cg.parse_cargo_used(["Cargo: 7/52"]))
+        self.assertEqual(12, cg.parse_cargo_used(["Catches", "Cargo 12 / 52"]))
+        self.assertEqual(0, cg.parse_cargo_used(["0/52"]))
+        self.assertIsNone(cg.parse_cargo_used(["Cargo", "Finish"]))
+        self.assertIsNone(cg.parse_cargo_used([]))
+
+
+class TestCardPlacement(unittest.TestCase):
+    def test_slot_positions_are_the_measured_ones(self):
+        self.assertEqual((180 / 1920, 268 / 1080), cg.card_center(0))
+        x, y = cg.card_center(4)
+        self.assertAlmostEqual((180 + 222) / 1920, x)
+        self.assertAlmostEqual((268 + 202) / 1080, y)

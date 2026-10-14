@@ -210,83 +210,81 @@ class BaitFishingTask(FishingTask):
     def cargo_screen_open(self):
         return self.has_text(r'Cargo|Catch', 0.0, 0.0, 0.6, 0.15)
 
+    LOAD_PASSES = 4
+    PLACE_WAIT = 4    # seconds for the Cargo counter to rise after a drop
+
     def load_cargo(self):
         self.info_set('current task', 'load cargo')
         if not self.wait_until(self.cargo_screen_open, time_out=15):
             self.fail('Cargo screen not open')
         self.sleep(random.uniform(0.6, 1.0))
         self.screenshot('cargo_screen')   # kept for measuring the card and grid geometry
-        self.calibrate_cards()
-        base = self.rgb_frame()
-        occupied = cg.occupied_cells(base)
-        catches = self.survey_catches(base)
-        plan = plan_cargo(cg.free_cells(occupied), catches)
-        self.log_info(f'cargo: {len(plan)} of {len(catches)} catches placed')
-        placed = set()
-        for catch, placement in plan:
-            if not self.place_catch(catch, placement, base, placed):
-                # Finish with fish still unplaced loses them: stop with the Cargo screen open instead
-                self.fail(f'cargo: slot {catch.slot} could not be placed; Cargo screen left open, Finish not pressed')
-            placed |= placement.cells
+        for _ in range(self.LOAD_PASSES):
+            occupied = cg.occupied_cells(self.rgb_frame())
+            catches = self.survey_catches()
+            plan = plan_cargo(cg.free_cells(occupied), catches)
+            self.log_info(f'cargo: {len(plan)} of {len(catches)} catches placed')
+            for catch, placement in plan:
+                if not self.place_catch(catch, placement):
+                    # Finish with fish still unplaced loses them: stop with the Cargo screen open instead
+                    self.fail(f'cargo: slot {catch.slot} could not be placed; Cargo screen left open, Finish not pressed')
+            # a full list may hide more fish behind the visible cards: look again once the placed ones have left
+            if not plan or len(catches) < cg.MAX_CARDS:
+                break
         self.click_at(*ui.FINISH_AT, after_sleep=random.uniform(1.0, 1.6))
 
-    card_origin = None
+    def cargo_used(self):
+        return cg.parse_cargo_used(self.texts(*cg.CARGO_COUNT_BOX))
 
-    def calibrate_cards(self):
-        # the Catch List's position is found from the value texts of its cards (digits at each card's bottom left)
-        boxes = self.ocr(*cg.CARD_REGION) or []
-        self.card_origin = cg.calibrate_card_origin(
-            (box.name, box.x, box.y + box.height / 2) for box in boxes)
-        if self.card_origin is None:
-            self.fail('no catch values found on the Catch List')
-        self.log_info(f'cargo: first card centre at {self.card_origin}')
-
-    def survey_catches(self, base):
-        # Click every card slot, read the shape from the preview and the value from the card; stop at the first
-        # slot that shows no preview (past the last fish).
+    def survey_catches(self):
+        # Click every card slot: the click shows the fish as a ghost on the grid, the value is read off the card.
+        # A slot without a card keeps the previous ghost (or none) and has no value.
         catches = []
+        previous = frozenset()
         for slot in range(cg.MAX_CARDS):
-            self.click_at(*cg.card_center(slot, self.card_origin), after_sleep=random.uniform(0.6, 0.9))
-            cells = cg.read_preview(base, self.rgb_frame())
+            self.click_at(*cg.card_center(slot), after_sleep=random.uniform(0.6, 0.9))
+            cells = cg.read_ghost(self.rgb_frame())
             if slot == 0:
                 self.screenshot('cargo_first_card')
-            if not cells:
+            value = cg.parse_value(self.texts(*cg.card_box(slot)))
+            if value is None and (not cells or cells == previous):
                 break
-            value = cg.parse_value(self.texts(*cg.card_box(slot, self.card_origin)))
+            if not cells:
+                self.fail(f'cargo: slot {slot} shows a value of {value} but no ghost on the grid; nothing was lost')
             if value is None:
-                self.log_info(f'slot {slot}: card value unreadable, counting it as 0')
-                value = 0
+                self.log_info(f'slot {slot}: card value unreadable, using its {len(cells)} cells as the value')
+                value = len(cells)
             catches.append(Catch(slot, cells, value))
+            previous = cells
         return catches
 
-    def place_catch(self, catch, placement, survey_base=None, placed=frozenset()):
-        """Place one catch; True when it was placed, False when it was left (the caller stops placing)."""
-        if survey_base is not None:
-            stray = cg.read_preview(survey_base, self.rgb_frame()) - frozenset(placed)
-            if stray:
-                self.log_info(f'slot {catch.slot}: a preview from an earlier card is still showing: {sorted(stray)}')
-        # a fresh base for every card: earlier placements are part of the cargo now and must not read as preview
-        base = self.rgb_frame()
-        self.click_at(*cg.card_center(catch.slot, self.card_origin), after_sleep=random.uniform(0.6, 0.9))
-        cells = cg.read_preview(base, self.rgb_frame())
-        # rotate by re-reading the preview, never by counting presses: the rotation direction is the game's
+    def place_catch(self, catch, placement):
+        """Place one catch by dragging its ghost; True when the Cargo counter rose, False when it did not (caller stops)."""
+        self.click_at(*cg.card_center(catch.slot), after_sleep=random.uniform(0.6, 0.9))
+        cells = cg.read_ghost(self.rgb_frame())
+        # rotate by re-reading the ghost, never by counting presses: the rotation direction is the game's
         for _ in range(4):
             if shape_matches(cells, placement):
                 break
             self.send_key('r', after_sleep=random.uniform(0.4, 0.7))
-            cells = cg.read_preview(base, self.rgb_frame())
+            cells = cg.read_ghost(self.rgb_frame())
         else:
             self.log_info(f'slot {catch.slot}: could not rotate to the planned shape, leaving it')
             return False
-        if cells != placement.cells:
-            grab, drop = grab_and_drop(cells, placement)
-            src, dst = cg.cell_center(*grab), cg.cell_center(*drop)
-            self.real.drag(src[0], src[1], dst[0], dst[1], random.uniform(0.8, 1.1))
-            self.sleep(random.uniform(0.5, 0.8))
-            if cg.read_preview(base, self.rgb_frame()) != placement.cells:
-                self.log_info(f'slot {catch.slot}: preview did not land on the planned cells, leaving it')
-                return False
-        self.send_key('space', after_sleep=random.uniform(0.5, 0.9))
+        used_before = self.cargo_used()
+        if used_before is None:
+            self.log_info(f'slot {catch.slot}: Cargo counter unreadable, leaving it')
+            return False
+        grab, drop = grab_and_drop(cells, placement)
+        src, dst = cg.cell_center(*grab), cg.cell_center(*drop)
+        if grab == drop:
+            # the game needs a real movement: end a quarter cell to the right, still inside the cell
+            dst = (dst[0] + cg.CELL_PX / 4 / 1920.0, dst[1])
+        self.real.drag(src[0], src[1], dst[0], dst[1], random.uniform(0.8, 1.1))
+        want = used_before + len(placement.cells)
+        if not self.wait_until(lambda: self.cargo_used() == want, time_out=self.PLACE_WAIT):
+            self.log_info(f'slot {catch.slot}: the Cargo counter did not reach {want}, leaving it')
+            return False
         return True
 
     def release_selected_fish(self):
