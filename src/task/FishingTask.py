@@ -186,9 +186,20 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
         self.sleep(1.0)
         self.click_at(*self.EVENT_GO, after_sleep=3.0)            # opens the map on the dock
         self.click_at(*self.FAST_TRAVEL, after_sleep=2.0)
-        self.wait_ocr(match=re.compile('Check the dock', re.I), time_out=90, raise_if_not_found=True,
-                      settle_time=1.0)
+        self.reach_planck()
         self.send_key('f', after_sleep=2.0)                       # opens the Dock hub
+
+    def reach_planck(self):
+        # Fast travel can land a few steps from Planck. Wait out the loading screen, then walk forward in short
+        # uneven steps until the "[F] Check the dock" prompt shows.
+        self.wait_until(lambda: self.in_team_and_world() or self.has_text('Check the dock'), time_out=90)
+        for _ in range(12):
+            if self.has_text('Check the dock'):
+                self.sleep(random.uniform(0.3, 0.8))
+                return
+            self.hold_key('w', random.uniform(0.5, 1.2))
+            self.sleep(random.uniform(0.3, 0.7))
+        self.fail('Planck not found after fast travel: no "Check the dock" prompt')
 
     REQUEST_MORE = (0.2375, 0.296)               # "..." on the tracked request in the dock hub
     REQUEST_LIST = (0.0, 0.08, 0.4, 0.8)        # OCR region of the request list on the left
