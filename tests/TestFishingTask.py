@@ -57,6 +57,30 @@ class TestPremiumAvailable(unittest.TestCase):
         self.assertFalse(premium_available([]))
 
 
+class TestCoords(unittest.TestCase):
+    def test_parses_the_readout(self):
+        from src.task.FishingTask import parse_coords
+        self.assertEqual((6962, 3089), parse_coords(['6962,3089,0 2026-10-1416:12:29+7* UHD']))
+
+    def test_unreadable_gives_none(self):
+        from src.task.FishingTask import parse_coords
+        self.assertIsNone(parse_coords(['UHD', '']))
+        self.assertIsNone(parse_coords([]))
+
+    def test_moved_after_a_sail_press(self):
+        from src.task.FishingTask import moved
+        self.assertTrue(moved((6953, 3064), (6962, 3089)))     # live: 2 s of W moved about 27 units
+
+    def test_not_moved_when_stuck(self):
+        from src.task.FishingTask import moved
+        self.assertFalse(moved((6962, 3089), (6963, 3090)))
+
+    def test_unreadable_counts_as_moved(self):
+        from src.task.FishingTask import moved
+        self.assertTrue(moved(None, (1, 1)))
+        self.assertTrue(moved((1, 1), None))
+
+
 class TestHubAnchor(unittest.TestCase):
     def test_matches_what_ocr_reads_on_the_hub(self):
         from src.task.FishingTask import HUB_ANCHOR

@@ -1,3 +1,4 @@
+import math
 import random
 import re
 import time
@@ -16,6 +17,22 @@ logger = Logger.get_logger(__name__)
 
 
 HUB_ANCHOR = re.compile(r'Fame|Set\s*Sail|Dock\s*Shop', re.IGNORECASE)   # OCR reads "Dock Shop" as "DockShop"
+
+
+def parse_coords(texts):
+    """Player position from the bottom-left readout, e.g. '6962,3089,0 2026-10-14...'."""
+    for text in texts:
+        match = re.search(r'(-?\d{3,6}),(-?\d{3,6}),-?\d+', text)
+        if match:
+            return int(match.group(1)), int(match.group(2))
+    return None
+
+
+def moved(before, after, min_units=8):
+    # live: a 2 s W press moves about 27 units; an unreadable position never counts as stuck
+    if before is None or after is None:
+        return True
+    return math.hypot(after[0] - before[0], after[1] - before[1]) >= min_units
 
 
 def next_action(error_deg, target_found):
@@ -209,6 +226,10 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
         last_px = full_px
         reset_done = False
         lost_in_row = 0
+        stuck = 0
+        detours = 0
+        clear_moves = 0
+        pos = self.read_coords()
         while True:
             if self.fish_prompt():
                 return
@@ -241,7 +262,37 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
                 self.turn_boat(err)
             else:
                 self.hold_key('w', hi.sail_press())
+                now = self.read_coords()
+                if moved(pos, now):
+                    stuck = 0
+                    clear_moves += 1
+                    if clear_moves >= 6:      # only a long clean run forgives earlier detours
+                        detours = max(0, detours - 1)
+                        clear_moves = 0
+                else:
+                    stuck += 1
+                    clear_moves = 0
+                pos = now if now is not None else pos
+                if stuck >= 2:
+                    if detours >= 6:
+                        self.fail('boat is stuck and detours did not free it')
+                    self.detour(detours)
+                    detours += 1
+                    stuck = 0
+                    pos = self.read_coords() or pos
             self.sleep(random.uniform(0.3, 0.8))
+
+    def read_coords(self):
+        return parse_coords(self.texts(0.0, 0.95, 0.3, 1.0))
+
+    def detour(self, attempt):
+        # Pinned against land or rock without taking damage: back off, then sail well clear sideways.
+        # The side alternates and the leg grows with each failed attempt, so a wall is eventually rounded.
+        side = 1 if attempt % 2 == 0 else -1
+        self.info_set('current task', f'detour {attempt + 1}')
+        self.hold_key('s', random.uniform(1.5, 2.5))
+        self.turn_boat(side * random.uniform(80, 120))
+        self.hold_key('w', random.uniform(3.0, 4.0) + 1.5 * attempt)
 
     def turn_boat(self, error_deg):
         # positive error: the target is anticlockwise of the heading, so turn left
