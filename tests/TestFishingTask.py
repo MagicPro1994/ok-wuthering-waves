@@ -38,18 +38,34 @@ class TestFishingTaskBasics(unittest.TestCase):
         self.assertIn(["src.task.FishingTask", "FishingTask"], config["onetime_tasks"])
 
 
-from src.task.FishingTask import premium_listed
+from src.task.FishingTask import premium_available, track_action
 
 
-class TestPremiumListed(unittest.TestCase):
-    def test_listed(self):
-        self.assertTrue(premium_listed(["Premium Request", "Special: One Last Tear"]))
+class TestPremiumAvailable(unittest.TestCase):
+    def test_open_entry_with_refresh_timer(self):
+        # live screen: the open premium entry shows its refresh countdown too
+        self.assertTrue(premium_available(["Night Special: Abyssal Mutants", "0/2", "Refresh", "in 13h"]))
 
-    def test_refreshing_only(self):
-        self.assertFalse(premium_listed(["Premium Refresh in 1h"]))
+    def test_partly_done(self):
+        self.assertTrue(premium_available(["Special: One Last Tear", "1/2"]))
 
-    def test_missing(self):
-        self.assertFalse(premium_listed(["Common Request", "Night Challenge"]))
+    def test_completed_entry(self):
+        self.assertFalse(premium_available(["Night Special: Abyssal Mutants", "2/2", "Refresh", "in 13h"]))
+
+    def test_no_entry(self):
+        self.assertFalse(premium_available(["Refresh", "in 13h"]))
+        self.assertFalse(premium_available([]))
+
+
+class TestTrackAction(unittest.TestCase):
+    def test_track_button(self):
+        self.assertEqual('track', track_action(["Track"]))
+
+    def test_already_tracking(self):
+        self.assertEqual('tracking', track_action(["Cancel Tracking"]))
+
+    def test_nothing_readable(self):
+        self.assertIsNone(track_action(["Request Rewards"]))
 
 
 from src.task.FishingTask import next_action

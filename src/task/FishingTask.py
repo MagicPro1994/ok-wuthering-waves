@@ -21,9 +21,22 @@ def next_action(error_deg, marker_found):
     return 'turn' if abs(error_deg) > 4 else 'forward'
 
 
-def premium_listed(texts):
-    premium = [t.lower() for t in texts if 'premium' in t.lower()]
-    return bool(premium) and not all('refresh' in t for t in premium)
+def premium_available(texts):
+    # An open premium entry shows its progress (0/2) next to the refresh timer; a finished one shows 2/2.
+    for text in texts:
+        match = re.search(r'(\d+)\s*/\s*(\d+)', text)
+        if match and int(match.group(1)) < int(match.group(2)):
+            return True
+    return False
+
+
+def track_action(texts):
+    joined = ' '.join(texts).lower()
+    if 'cancel' in joined:
+        return 'tracking'
+    if any(re.fullmatch(r'\s*track\s*', t, re.IGNORECASE) for t in texts):
+        return 'track'
+    return None
 
 
 def catch_list_empty(texts):
@@ -127,18 +140,28 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
                       settle_time=1.0)
         self.send_key('f', after_sleep=2.0)                       # opens the Dock hub
 
+    PREMIUM_ROW = (0.03, 0.14, 0.38, 0.24)       # OCR region of the premium entry (name, progress, refresh)
+    PREMIUM_ENTRY = (0.19, 0.19)
+    TRACK_BUTTON = (0.78, 0.86, 0.98, 0.95)      # OCR region of Track / Cancel Tracking
+    TRACK_AT = (0.877, 0.903)
+
     def pick_premium(self):
-        # Planck dialog -> "Fishing Request"; the Premium tab/entry is at the top of the request list.
+        # Dock hub -> "Fishing Request"; select the premium entry and track it unless it already is.
         self.wait_ocr(match=re.compile('Fishing Request', re.I), time_out=15, raise_if_not_found=True,
                       settle_time=0.5)
         self.click_ocr_text('Fishing Request')
         self.sleep(1.2)
-        if not premium_listed(self.texts(0.0, 0.15, 0.4, 0.5)):
+        if not premium_available(self.texts(*self.PREMIUM_ROW)):
             return False
-        self.click_ocr_text('Premium')
-        self.sleep(0.8)
-        self.click_at(0.88, 0.93)  # Track (about (0.88, 0.93) in the probe session)
-        self.sleep(1.0)
+        self.click_at(*self.PREMIUM_ENTRY, after_sleep=0.8)
+        action = track_action(self.texts(*self.TRACK_BUTTON))
+        if action is None:
+            self.fail('Track button not found on the premium request')
+        if action == 'track':
+            self.click_at(*self.TRACK_AT, after_sleep=1.0)
+            if track_action(self.texts(*self.TRACK_BUTTON)) != 'tracking':
+                self.fail('premium request did not become tracked')
+        self.send_key('esc', after_sleep=1.2)     # back to the dock hub
         return True
 
     def prepare_and_sail(self):
