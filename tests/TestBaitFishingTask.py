@@ -75,3 +75,32 @@ class TestRegistration(unittest.TestCase):
         task.key_config = Keys()
         with self.assertRaises(Exception):
             task.check_tool_key()
+
+
+class Nudger(BaitFishingTask):
+    def __init__(self, states):
+        self.states = list(states)
+        self.presses = []
+
+    def hold_key(self, key, seconds):
+        self.presses.append(key)
+
+    def sleep(self, seconds):
+        pass
+
+    def fail(self, message):
+        raise Exception(message)
+
+
+class TestNudge(unittest.TestCase):
+    def test_nudges_until_the_condition_holds(self):
+        task = Nudger([False, False, True])
+        task.nudge_until('w', lambda: task.states.pop(0), tries=5, label='x')
+        self.assertEqual(['w', 'w'], task.presses)
+
+    def test_fails_after_the_bound(self):
+        task = Nudger([False] * 10)
+        with self.assertRaises(Exception) as ctx:
+            task.nudge_until('s', lambda: task.states.pop(0), tries=3, label='the dock prompt')
+        self.assertIn('the dock prompt', str(ctx.exception))
+        self.assertEqual(3, len(task.presses))

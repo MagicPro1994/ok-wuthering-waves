@@ -90,8 +90,54 @@ class BaitFishingTask(FishingTask):
 
     # ---- game-facing states (Tasks 6 to 8) -----------------------------
 
-    def clear_dock_prompt(self): raise NotImplementedError
-    def launch_bait(self): raise NotImplementedError
+    def prompt_texts(self):
+        return self.texts(*ui.PROMPT_BOX)
+
+    def nudge_until(self, key, done, tries, label):
+        for _ in range(tries):
+            if done():
+                return
+            self.hold_key(key, hi.nudge_press())
+            self.sleep(random.uniform(0.3, 0.7))
+        if done():
+            return
+        self.fail(f'{label}: not reached after {tries} presses of {key}')
+
+    def select_entry(self, pattern, label):
+        # The prompt list starts on its first entry; scroll until the wanted entry carries the F key badge.
+        for _ in range(4):
+            boxes = [(box.name, (box.y + box.height / 2) / self.height)
+                     for box in (self.ocr(*ui.PROMPT_BOX) or [])]
+            selected = entry_selected(boxes, pattern)
+            if selected:
+                return
+            if selected is None:
+                self.fail(f'{label} entry not found in the prompt list')
+            self.scroll_relative(*ui.PROMPT_SCROLL_AT, ui.SCROLL_DOWN)
+            self.sleep(random.uniform(0.3, 0.6))
+        self.fail(f'could not select the {label} entry')
+
+    def clear_dock_prompt(self):
+        # The fish spot appears ahead of the boat: leave the dock's reach before baiting.
+        self.info_set('current task', 'leave the dock prompt')
+        self.nudge_until('w', lambda: not prompt_state(self.prompt_texts()).return_dock,
+                         tries=10, label='leaving the dock prompt')
+
+    def launch_bait(self):
+        self.info_set('current task', 'launch bait')
+        self.equip('baiting')
+        self.send_key(self.key_config.get('Tool Key'), after_sleep=random.uniform(0.8, 1.3))
+        if not self.wait_until(lambda: dialog_open(self.texts(0.2, 0.1, 0.8, 0.5)), time_out=10):
+            self.fail('Use Bait dialog did not open')
+        self.click_at(*ui.CONFIRM_AT, after_sleep=random.uniform(0.8, 1.2))
+        if not self.wait_until(lambda: sandworm_launched(self.texts()), time_out=20):
+            self.fail('Sandworm launched message did not show')
+        self.sleep(random.uniform(0.6, 1.2))
+
     def catch_fish(self): raise NotImplementedError
     def load_cargo(self): raise NotImplementedError
-    def return_to_dock(self): raise NotImplementedError
+    def return_to_dock(self):
+        self.info_set('current task', 'return to dock')
+        self.nudge_until('s', lambda: prompt_state(self.prompt_texts()).return_dock,
+                         tries=12, label='the Return to the dock prompt')
+        self.select_entry(r'return\s+to\s+the\s+dock', 'Return to the dock')
