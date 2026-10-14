@@ -409,7 +409,9 @@ class BaitFishingTask(FishingTask):
             cells = cg.read_draft(base, self.rgb_frame(), occupied)
             if slot == 0:
                 self.screenshot('cargo_first_card')
-            value = cg.parse_value(self.texts(*cg.card_box(slot)))
+            value = cg.parse_value(self.texts(*cg.PRICE_BOX))
+            if value is None:
+                value = cg.parse_value(self.texts(*cg.card_box(slot)))
             if not cells:
                 if value is not None:
                     self.fail(f'cargo: slot {slot} shows a value of {value} but no draft on the grid; nothing was lost')
@@ -467,6 +469,9 @@ class BaitFishingTask(FishingTask):
             self.real.drag(src[0], src[1], dst[0], dst[1], random.uniform(0.8, 1.1))
             self.sleep(random.uniform(0.5, 0.8))
             landed = cg.read_draft(base, self.rgb_frame(), occupied)
+            if landed != placement.cells and self.already_placed(placement, used_before):
+                self.log_info(f'slot {catch.slot}: the drop already confirmed the fish on the planned cells')
+                return True
             if landed != placement.cells:
                 self.screenshot('cargo_after_drag')
                 self.log_info(f'slot {catch.slot}: the draft did not land on the planned cells, leaving it: '
@@ -481,6 +486,15 @@ class BaitFishingTask(FishingTask):
             self.clear_draft()      # a valid draft left up would be auto-placed by the next click
             return False
         return True
+
+    def already_placed(self, placement, used_before):
+        # A drop can leave the fish confirmed already: the draft read then finds no draft. Trust the counter and the
+        # board together: it rose by the fish's size and the planned cells are occupied.
+        want = used_before + len(placement.cells)
+        if not self.wait_until(lambda: self.cargo_used() == want, time_out=1.5):
+            return False
+        board = cg.occupied_cells(self.settled_frame())
+        return all(cell in board for cell in placement.cells)
 
     def release_selected_fish(self):
         # `FishingTask.sell_all` calls this when Sell All refuses because a fish is still selected. After

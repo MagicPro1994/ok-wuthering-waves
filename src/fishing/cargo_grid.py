@@ -20,6 +20,8 @@ CARD_PITCH = (222.0, 202.0)     # (x, y) distance between slot centres
 CARD_COLS = 3
 CARD_SIZE = (210.0, 188.0)
 MAX_CARDS = 6
+# The details panel under the list prints the clicked card's price in large type: far easier to read than the card.
+PRICE_BOX = (0.30, 0.735, 0.39, 0.78)
 CARGO_COUNT_BOX = (0.42, 0.04, 0.56, 0.10)   # the "Cargo: 7/52" counter at the top
 
 

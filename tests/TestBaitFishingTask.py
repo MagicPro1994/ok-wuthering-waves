@@ -357,6 +357,32 @@ class TestPlaceCatch(unittest.TestCase):
         self.assertEqual([], task.drags)
         self.assertEqual(['space'], task.keys)
 
+    def test_a_drop_that_already_confirmed_the_fish_counts_as_placed(self):
+        class DropConfirms(Placer):
+            def drag(self, *a):
+                super().drag(*a)
+                self.placed |= self.draft
+                self.used += len(self.draft)
+                self.draft = frozenset()
+
+        cells = frozenset({(2, 2), (2, 3)})
+        task = DropConfirms({1: sorted(cells)})
+        want = frozenset({(4, 4), (4, 5)})
+        self.assertTrue(task.place_catch(Catch(1, cells, 100), Placement(0, want, (4, 4))))
+        self.assertEqual(9, task.used)
+
+    def test_already_placed_needs_the_counter_and_the_cells(self):
+        want = frozenset({(4, 4), (4, 5)})
+        done = Placer({})
+        done.placed, done.used = set(want), 9
+        self.assertTrue(done.already_placed(Placement(0, want, (4, 4)), 7))
+        no_counter = Placer({})
+        no_counter.placed, no_counter.used = set(want), 7
+        self.assertFalse(no_counter.already_placed(Placement(0, want, (4, 4)), 7))
+        no_cells = Placer({})
+        no_cells.used = 9
+        self.assertFalse(no_cells.already_placed(Placement(0, want, (4, 4)), 7))
+
     def test_rotates_by_reading_the_draft_again(self):
         flat = [(2, 2), (2, 3)]
         upright = [(2, 2), (3, 2)]
