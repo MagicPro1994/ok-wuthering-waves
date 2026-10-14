@@ -140,16 +140,20 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
                       settle_time=1.0)
         self.send_key('f', after_sleep=2.0)                       # opens the Dock hub
 
-    PREMIUM_ROW = (0.03, 0.14, 0.38, 0.24)       # OCR region of the premium entry (name, progress, refresh)
+    REQUEST_MORE = (0.2375, 0.296)               # "..." on the tracked request in the dock hub
+    PREMIUM_ROW = (0.03, 0.14, 0.38, 0.24)      # OCR region of the premium entry (name, progress, refresh)
     PREMIUM_ENTRY = (0.19, 0.19)
     TRACK_BUTTON = (0.78, 0.86, 0.98, 0.95)      # OCR region of Track / Cancel Tracking
     TRACK_AT = (0.877, 0.903)
 
     def pick_premium(self):
         # Dock hub -> "Fishing Request"; select the premium entry and track it unless it already is.
-        self.wait_ocr(match=re.compile('Fishing Request', re.I), time_out=15, raise_if_not_found=True,
-                      settle_time=0.5)
-        self.click_ocr_text('Fishing Request')
+        self.wait_ocr(match=re.compile('Dock Shop', re.I), time_out=20, raise_if_not_found=True,
+                      settle_time=0.8)
+        # Nothing tracked: the hub shows a "Fishing Request" row. A tracked request replaces it with its own
+        # panel, whose "..." opens the same Fishing Request screen.
+        if not self.click_ocr_text('Fishing Request', 0.0, 0.1, 0.5, 0.4):
+            self.click_at(*self.REQUEST_MORE)
         self.sleep(1.2)
         if not premium_available(self.texts(*self.PREMIUM_ROW)):
             return False
@@ -255,7 +259,7 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
         self.click_at(0.657, 0.628, after_sleep=2.0)       # Confirm fast travel to the dock
         self.wait_until(lambda: self.has_text('Return to the dock'), time_out=60)
         self.send_key('f', after_sleep=2.5)
-        self.click_at(0.2375, 0.296, after_sleep=1.0)      # request "..."
+        self.click_at(*self.REQUEST_MORE, after_sleep=1.0)  # request "..."
         self.click_at(0.875, 0.902, after_sleep=2.0)       # Deliver
         self.click_at(0.5, 0.85, after_sleep=1.5)          # close rewards
 
