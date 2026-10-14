@@ -93,9 +93,10 @@ class BaitFishingTask(FishingTask):
     def point_cursor(self, fx, fy):
         # the wheel picks the slot under the real cursor when the key is released (see CombatCheck's tab wheel)
         x, y = hi.offset_point(fx, fy)
-        px, py = x * self.width, y * self.height
+        px, py = int(x * self.width), int(y * self.height)
         self.move(px, py)
-        win32api.SetCursorPos(self.executor.interaction.capture.get_abs_cords(px, py))
+        abs_x, abs_y = self.executor.interaction.capture.get_abs_cords(px, py)
+        win32api.SetCursorPos((int(abs_x), int(abs_y)))
 
     def equip(self, name):
         # Tab is a hold-to-open wheel: hold it, point at the utility, release to select
