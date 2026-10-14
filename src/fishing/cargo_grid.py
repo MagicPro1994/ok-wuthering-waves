@@ -15,11 +15,12 @@ EMPTY_RGB = (52, 52, 52)
 # Fish cards on the Catches screen, 1920x1080 pixels.
 # UNVERIFIED ESTIMATES: cargo_cards.png is not in the repo (it needs the live game), so these
 # values were NOT measured. Measure them live from cargo_cards.png and replace them before relying on card_center/card_box.
+# MAX_CARDS=8 (the plan said 12) was chosen so every slot is on screen with these estimates: with 12, slots 10-11 fall below y=1080.
 CARD_ORIGIN = (180.0, 259.0)    # centre of slot 0
 CARD_PITCH = (227.0, 190.0)     # (x, y) distance between slot centres
 CARD_COLS = 2
 CARD_SIZE = (200.0, 170.0)
-MAX_CARDS = 12
+MAX_CARDS = 8
 
 
 def cell_center(row: int, col: int) -> Tuple[float, float]:
