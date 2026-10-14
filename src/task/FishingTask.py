@@ -71,6 +71,7 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
                             "deliver it, then sell all fish. Start in the open world. Needs an elevated run.")
         self.default_config.update({'Max Sail Minutes': 25})
         self.real = None
+        self.avoid_side = random.choice([-1, 1])
 
     def run(self):
         WWOneTimeTask.run(self)
@@ -245,7 +246,17 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
             heading = detect.arrow_heading(rgb)
             bearing = detect.minimap_target_bearing(rgb)
             found = heading is not None and bearing is not None
-            err = detect.heading_error(heading, bearing) if found else 0.0
+            aim = bearing
+            if found:
+                aim = self.clear_bearing(rgb, bearing)
+                if aim is None:
+                    # land on every side: back off and go round instead of pushing in
+                    if detours >= 6:
+                        self.fail('boxed in by land and detours did not free the boat')
+                    self.detour(detours)
+                    detours += 1
+                    continue
+            err = detect.heading_error(heading, aim) if found else 0.0
             action = next_action(err, found)
             if action == 'lost':
                 lost_in_row += 1
@@ -281,6 +292,20 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
                     stuck = 0
                     pos = self.read_coords() or pos
             self.sleep(random.uniform(0.3, 0.8))
+
+    def clear_bearing(self, rgb, bearing):
+        # Aim at the nearest direction to the target whose minimap wedge is open water. Near the target
+        # (icon well inside the rim) the final approach ignores land: the fish spot itself may be by a shore.
+        radius = detect.minimap_target_radius(rgb)
+        if radius is not None and radius < 45:
+            return bearing
+        steered = detect.steer_bearing(detect.minimap_danger(rgb), bearing, self.avoid_side)
+        if steered is None:
+            return None
+        aim, offset = steered
+        if offset:
+            self.avoid_side = 1 if offset > 0 else -1
+        return aim
 
     def read_coords(self):
         return parse_coords(self.texts(0.0, 0.95, 0.3, 1.0))

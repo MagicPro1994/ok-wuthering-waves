@@ -84,6 +84,36 @@ def angle_gap(a, b):
     return abs((a - b + 180) % 360 - 180)
 
 
+class TestLandAvoidance(unittest.TestCase):
+    def mask(self, name):
+        return detect.minimap_danger(frame_with_minimap(name))
+
+    def test_open_sea_is_clear_in_every_direction(self):
+        for name in ('mini_west.png', 'mini_sea_day.png', 'mini_north.png'):
+            mask = self.mask(name)
+            for bearing in range(0, 360, 30):
+                self.assertLess(detect.sector_danger(mask, bearing), 0.3, (name, bearing))
+
+    def test_dock_is_dangerous_to_the_north_east(self):
+        mask = self.mask('mini_dock.png')
+        self.assertGreater(detect.sector_danger(mask, 45), 0.4)
+        self.assertLess(detect.sector_danger(mask, 200), 0.1)
+
+    def test_steers_around_land(self):
+        mask = self.mask('mini_dock.png')
+        bearing, offset = detect.steer_bearing(mask, 45)
+        self.assertGreaterEqual(abs(offset), 30)
+        self.assertLess(detect.sector_danger(mask, bearing), 0.3)
+
+    def test_keeps_the_target_bearing_when_clear(self):
+        mask = self.mask('mini_sea_day.png')
+        self.assertEqual((200, 0), detect.steer_bearing(mask, 200))
+
+    def test_boxed_in_gives_none(self):
+        full = np.ones((260, 260), bool)
+        self.assertIsNone(detect.steer_bearing(full, 90))
+
+
 class TestMinimap(unittest.TestCase):
     def test_arrow_points_west(self):
         self.assertLess(angle_gap(detect.arrow_heading(frame_with_minimap('mini_west.png')), 180), 20)
@@ -100,6 +130,11 @@ class TestMinimap(unittest.TestCase):
     def test_target_bearing_is_east(self):
         for name in ('mini_west.png', 'mini_north.png', 'mini_southeast.png'):
             self.assertLess(angle_gap(detect.minimap_target_bearing(frame_with_minimap(name)), 358), 8, name)
+
+    def test_target_radius_is_at_the_rim_when_far(self):
+        # live: a far target is pinned to the minimap edge
+        self.assertTrue(60 < detect.minimap_target_radius(frame_with_minimap('mini_west.png')) < 90)
+        self.assertIsNone(detect.minimap_target_radius(blank()))
 
     def test_no_target_gives_none(self):
         self.assertIsNone(detect.minimap_target_bearing(blank()))

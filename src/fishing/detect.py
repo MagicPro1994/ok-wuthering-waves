@@ -72,8 +72,7 @@ def arrow_heading(rgb: np.ndarray) -> Optional[float]:
     return _angle(tip[0], -tip[1])
 
 
-def minimap_target_bearing(rgb: np.ndarray) -> Optional[float]:
-    """Bearing of the purple request icon on the minimap, seen from the player arrow."""
+def _target_icon(rgb: np.ndarray) -> Optional[Tuple[float, float]]:
     cx, cy = MINIMAP_CENTRE
     r, g, b = [rgb[:260, :260, i].astype(int) for i in range(3)]
     yy, xx = np.mgrid[0:260, 0:260]
@@ -81,7 +80,66 @@ def minimap_target_bearing(rgb: np.ndarray) -> Optional[float]:
     ys, xs = np.nonzero(mask)
     if len(xs) < 20:
         return None
-    return _angle(xs.mean() - cx, ys.mean() - cy)
+    return xs.mean() - cx, ys.mean() - cy
+
+
+def minimap_target_bearing(rgb: np.ndarray) -> Optional[float]:
+    """Bearing of the purple request icon on the minimap, seen from the player arrow."""
+    icon = _target_icon(rgb)
+    return None if icon is None else _angle(*icon)
+
+
+def minimap_target_radius(rgb: np.ndarray) -> Optional[float]:
+    """Distance of the request icon from the arrow in minimap pixels; a far target sits at the rim."""
+    icon = _target_icon(rgb)
+    return None if icon is None else float(np.hypot(*icon))
+
+
+def _minimap_grid():
+    cx, cy = MINIMAP_CENTRE
+    yy, xx = np.mgrid[0:260, 0:260]
+    return np.hypot(xx - cx, yy - cy), np.degrees(np.arctan2(-(yy - cy), xx - cx)) % 360
+
+
+def minimap_danger(rgb: np.ndarray) -> np.ndarray:
+    """Pixels of the minimap that are not open water (land, shallows, structures), as a 260x260 mask.
+
+    The minimap is translucent, so the water colour is taken from the frame itself: the median of the ring around
+    the boat. The view cone is that colour blended 17.5% towards white; anything matching neither is not water.
+    """
+    a = rgb[:260, :260].astype(int)
+    rad, _ = _minimap_grid()
+    r, g, b = a[..., 0], a[..., 1], a[..., 2]
+    yellow = (r > 180) & (g > 130) & (b < 140)
+    purple = (r > 100) & (b > 130) & (g < 120) & (b - g > 40)
+    white = (r > 190) & (g > 190) & (b > 190)
+    over = cv2.dilate((yellow | purple | white).astype(np.uint8), np.ones((9, 9), np.uint8)) > 0
+    ring = (rad > 30) & (rad < 70) & ~over
+    ref = np.median(a[ring], axis=0) if ring.any() else a.reshape(-1, 3).mean(0)
+    cone = ref * 0.825 + 255 * 0.175
+    water = (np.abs(a - ref).max(2) <= 14) | (np.abs(a - cone).max(2) <= 16)
+    bad = ~water & ~over & (rad < 74)
+    return cv2.morphologyEx(bad.astype(np.uint8), cv2.MORPH_OPEN, np.ones((5, 5), np.uint8)) > 0
+
+
+def sector_danger(mask: np.ndarray, bearing: float, half_width: float = 15.0) -> float:
+    """Share of the wedge around a bearing (minimap angle, east 0 anticlockwise) that is not open water."""
+    rad, ang = _minimap_grid()
+    wedge = (rad > 20) & (rad < 74) & (np.abs((ang - bearing + 180) % 360 - 180) <= half_width)
+    return float(mask[wedge].mean()) if wedge.any() else 0.0
+
+
+def steer_bearing(mask: np.ndarray, target_bearing: float, prefer: int = 1, limit: float = 0.3):
+    """Nearest clear bearing to the target's, as (bearing, offset), or None when every direction is blocked.
+
+    `prefer` (+1 / -1) breaks ties toward the side the boat already turned, so it does not flip-flop.
+    """
+    for offset in range(0, 181, 20):
+        for sign in ((1,) if offset == 0 else (prefer, -prefer)):
+            candidate = (target_bearing + sign * offset) % 360
+            if sector_danger(mask, candidate) < limit:
+                return candidate, sign * offset
+    return None
 
 
 def heading_error(heading: float, bearing: float) -> float:
