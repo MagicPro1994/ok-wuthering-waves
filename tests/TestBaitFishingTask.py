@@ -456,9 +456,15 @@ class Loader(Placer):
         self.surveys = list(surveys)
         self.results = list(results)
         self.tried = []
+        self.sales = []             # results of the scripted quick sales
+        self.sold = 0
 
     def cargo_screen_open(self):
         return True
+
+    def quick_sale(self):
+        self.sold += 1
+        return self.sales.pop(0) if self.sales else False
 
     def survey_catches(self):
         return self.surveys.pop(0)
@@ -548,6 +554,122 @@ class TestCargoHelper(unittest.TestCase):
             module.WWOneTimeTask.run, module.RealInput = original
         self.assertEqual([False, 'log'], calls)
         self.assertEqual('real', task.real)
+
+
+class TestLoadCargoQuickSale(unittest.TestCase):
+    def leftover_list(self):
+        every = frozenset((r, c) for r in range(7) for c in range(8))
+        return [Catch(0, frozenset({(2, 2)}), 100), Catch(1, every, 5)]
+
+    def test_a_successful_quick_sale_runs_another_pass(self):
+        task = Loader([self.leftover_list(), two_catches()], [True, True, True])
+        task.sales = [True]
+        task.load_cargo()
+        self.assertEqual(1, task.sold)
+        self.assertEqual([], task.surveys)
+        self.assertTrue(any('fish left over, trying Quick Sale' in n for n in task.notes))
+        self.assertEqual(ui.FINISH_AT, task.clicked[-1])
+
+    def test_a_failed_quick_sale_stops_the_passes(self):
+        task = Loader([self.leftover_list(), two_catches()], [True])
+        task.sales = [False]
+        task.load_cargo()
+        self.assertEqual(1, task.sold)
+        self.assertEqual(1, len(task.surveys))
+
+    def test_quick_sales_are_bounded(self):
+        task = Loader([self.leftover_list() for _ in range(6)], [True] * 20)
+        task.sales = [True] * 10
+        task.load_cargo()
+        self.assertEqual(task.MAX_QUICK_SALES, task.sold)
+        self.assertEqual(6 - (task.MAX_QUICK_SALES + 1), len(task.surveys))
+
+    def test_a_pass_without_leftovers_and_a_short_list_stops(self):
+        task = Loader([two_catches(), two_catches()], [True, True])
+        task.load_cargo()
+        self.assertEqual(0, task.sold)
+        self.assertEqual(1, len(task.surveys))
+
+
+class QuickSeller(Placer):
+    """The Quick Sale panel: `c` opens it, `e` sells the zone and shows Items Obtained, a click on blank space returns."""
+
+    def __init__(self, price=13606, panel=True, drops=True):
+        super().__init__({})
+        self.price = price
+        self.panel = panel
+        self.drops = drops
+        self.panel_open = False
+        self.items = False
+        self.used = 44
+
+    def cargo_screen_open(self):
+        return not self.items
+
+    def has_text(self, pattern, *region):
+        if 'Quick' in pattern:
+            return self.panel_open
+        if 'Items' in pattern:
+            return self.items
+        return False
+
+    def texts(self, x=0, y=0, to_x=1, to_y=1):
+        if (x, y, to_x, to_y) == self.QUICK_SALE_PRICE:
+            return [str(self.price)] if self.price is not None else ['Total Price']
+        return super().texts(x, y, to_x, to_y)
+
+    def send_key(self, key, after_sleep=0.2, **kwargs):
+        super().send_key(key, after_sleep)
+        if key == 'c' and self.panel:
+            self.panel_open = True
+        if key == 'e' and self.panel_open:
+            self.panel_open = False
+            self.items = True
+
+    def click_at(self, fx, fy, after_sleep=0.4):
+        self.events.append(('click', fx, fy))
+        if (fx, fy) == self.QUICK_SALE_CLOSE_AT:
+            self.panel_open = False
+        if (fx, fy) == self.REWARD_CLOSE_AT and self.items:
+            self.items = False
+            if self.drops:
+                self.used = 21
+
+
+class TestQuickSale(unittest.TestCase):
+    def test_sells_the_zone_and_returns_to_the_catches_screen(self):
+        task = QuickSeller()
+        self.assertTrue(task.quick_sale())
+        self.assertEqual(['c', 'e'], task.keys)
+        self.assertEqual(('click', 0.5, 0.85), [e for e in task.events if isinstance(e, tuple)][-1])
+        self.assertLess(task.events.index('e'), task.events.index(('click', 0.5, 0.85)))
+        self.assertTrue(any('freed 23 cells, price 13606' in n for n in task.notes))
+
+    def test_returns_false_when_the_panel_never_opens(self):
+        task = QuickSeller(panel=False)
+        self.assertFalse(task.quick_sale())
+        self.assertEqual(['c'], task.keys)
+
+    def test_closes_the_panel_when_the_zone_is_worth_nothing(self):
+        for price in (0, None):
+            task = QuickSeller(price=price)
+            self.assertFalse(task.quick_sale())
+            self.assertEqual(['c'], task.keys)
+            self.assertIn(('click', 0.366, 0.535), task.events)
+            self.assertFalse(task.panel_open)
+
+    def test_fails_when_the_counter_never_drops(self):
+        task = QuickSeller(drops=False)
+        with self.assertRaises(Exception) as ctx:
+            task.quick_sale()
+        self.assertIn('did not free any cargo', str(ctx.exception))
+
+    def test_fails_when_items_obtained_never_shows(self):
+        task = QuickSeller()
+        task.send_key = lambda key, after_sleep=0.2, **k: setattr(task, 'panel_open', key == 'c')
+        with self.assertRaises(Exception) as ctx:
+            task.quick_sale()
+        self.assertIn('Items Obtained', str(ctx.exception))
 
 
 class Prompter(BaitFishingTask):

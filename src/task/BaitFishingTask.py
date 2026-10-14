@@ -211,7 +211,8 @@ class BaitFishingTask(FishingTask):
     def cargo_screen_open(self):
         return self.has_text(r'Cargo|Catch', 0.0, 0.0, 0.6, 0.15)
 
-    LOAD_PASSES = 4
+    LOAD_PASSES = 6
+    MAX_QUICK_SALES = 3
     PLACE_WAIT = 4    # seconds for the Cargo counter to rise after a confirm
 
     def load_cargo(self, finish=True):
@@ -220,7 +221,10 @@ class BaitFishingTask(FishingTask):
             self.fail('Cargo screen not open')
         self.sleep(random.uniform(0.6, 1.0))
         self.screenshot('cargo_screen')   # kept for measuring the card and grid geometry
-        for _ in range(self.LOAD_PASSES):
+        sales = 0
+        passes = 0
+        while passes < self.LOAD_PASSES:
+            passes += 1
             self.clear_draft()      # a draft left on screen would end up in the base frames
             occupied = cg.occupied_cells(self.rgb_frame())
             catches = self.survey_catches()
@@ -233,12 +237,60 @@ class BaitFishingTask(FishingTask):
                 if not self.place_catch(catch, placement):
                     # Finish with fish still unplaced loses them: stop with the Cargo screen open instead
                     self.fail(f'cargo: slot {catch.slot} could not be placed; Cargo screen left open, Finish not pressed')
-            # a full list may hide more fish behind the visible cards: look again once the placed ones have left
-            if not plan or len(catches) < cg.MAX_CARDS:
+            leftovers = len(catches) - len(plan)
+            if leftovers > 0:
+                if sales >= self.MAX_QUICK_SALES:
+                    self.log_info(f'cargo: {leftovers} fish left over, Quick Sale already used {sales} times')
+                    break
+                self.log_info(f'cargo: {leftovers} fish left over, trying Quick Sale')
+                self.clear_draft()
+                if not self.quick_sale():
+                    break
+                sales += 1
+            elif len(catches) < cg.MAX_CARDS:
                 break
+            # else: a full list may hide more fish behind the visible cards, look again once the placed ones have left
         self.clear_draft()      # the survey leaves the last probed card's draft up
         if finish:
             self.click_at(*ui.FINISH_AT, after_sleep=random.uniform(1.0, 1.6))
+
+    QUICK_SALE_PANEL = (0.02, 0.5, 0.45, 0.95)
+    QUICK_SALE_PRICE = (0.1, 0.74, 0.35, 0.83)
+    QUICK_SALE_CLOSE_AT = (0.366, 0.535)
+    REWARD_CLOSE_AT = (0.5, 0.85)
+
+    def quick_sale_open(self):
+        return self.has_text(r'Quick\s*Sale', *self.QUICK_SALE_PANEL)
+
+    def quick_sale(self):
+        """Sell everything in the dashed zone (`c` opens the panel, `e` sells). True when cargo was freed."""
+        self.info_set('current task', 'quick sale')
+        self.send_key('c', after_sleep=random.uniform(0.8, 1.2))
+        if not self.wait_until(self.quick_sale_open, time_out=4):
+            self.log_info('quick sale: the panel did not open')
+            return False
+        price = cg.parse_value(self.texts(*self.QUICK_SALE_PRICE))
+        if not price:
+            self.log_info('quick sale: nothing in the zone to sell, closing the panel')
+            self.click_at(*self.QUICK_SALE_CLOSE_AT, after_sleep=random.uniform(0.6, 0.9))
+            if not self.wait_until(lambda: not self.quick_sale_open(), time_out=4):
+                self.log_info('quick sale: the panel did not close')
+            return False
+        used_before = self.cargo_used()
+        self.send_key('e', after_sleep=random.uniform(0.8, 1.2))
+        if not self.wait_until(lambda: self.has_text(r'Items\s*Obtained'), time_out=8):
+            self.fail('Quick Sale did not show Items Obtained, Cargo screen left open')
+        self.click_at(*self.REWARD_CLOSE_AT, after_sleep=random.uniform(1.0, 1.5))
+        if not self.wait_until(self.cargo_screen_open, time_out=8):
+            self.fail('Cargo screen did not come back after Quick Sale')
+
+        def freed():
+            used = self.cargo_used()
+            return used is not None and used_before is not None and used < used_before
+        if not self.wait_until(freed, time_out=5):
+            self.fail('Quick Sale did not free any cargo, Cargo screen left open')
+        self.log_info(f'quick sale freed {used_before - self.cargo_used()} cells, price {price}')
+        return True
 
     def clear_draft(self):
         # Q returns the drafted fish to the list (never 't': that trashes it)
