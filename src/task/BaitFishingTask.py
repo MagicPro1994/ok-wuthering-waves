@@ -69,10 +69,23 @@ class BaitFishingTask(FishingTask):
         self.catch_fish()
         self.load_cargo()
         self.return_to_dock()
-        self.send_key('f', after_sleep=random.uniform(1.8, 2.6))   # opens the Dock hub
-        self.wait_ocr(match=HUB_ANCHOR, time_out=20, raise_if_not_found=True, settle_time=0.8)
+        self.open_dock_hub()
         self.sell_all()
         self.set_sail()
+
+    def open_dock_hub(self):
+        # the first F can land while the boat still drifts and the prompt flickers: press it again
+        for _ in range(4):
+            self.send_key('f', after_sleep=random.uniform(1.8, 2.6))
+            if self.wait_until(lambda: self.has_text(HUB_ANCHOR.pattern), time_out=5):
+                self.sleep(0.8)
+                return
+            if prompt_state(self.prompt_texts()).fish:
+                self.select_entry(r'return\s+to\s+the\s+dock', 'Return to the dock')
+            elif not prompt_state(self.prompt_texts()).return_dock:
+                self.nudge_until('s', lambda: prompt_state(self.prompt_texts()).return_dock,
+                                 tries=6, label='the Return to the dock prompt')
+        self.fail('the Dock hub did not open after pressing F')
 
     HUB_CARGO_BOX = (0.80, 0.84, 0.88, 0.89)    # "N/52" above the Dock Shop button of the Dock hub
 

@@ -1136,3 +1136,31 @@ class TestSellAll(unittest.TestCase):
         task = Seller([20, 7], ['Sell All', 'Dock Shop'])
         with self.assertRaises(Exception):
             task.sell_all()
+
+
+class HubOpener(BaitFishingTask):
+    def __init__(self, opens_on_press):
+        self.opens_on_press = opens_on_press
+        self.presses = 0
+
+    def send_key(self, key, **k): self.presses += 1
+    def sleep(self, *a): pass
+    def has_text(self, *a, **k): return self.presses >= self.opens_on_press
+    def wait_until(self, cond, time_out=10, **k): return cond()
+    def prompt_texts(self): return ['Return to the dock']
+    def select_entry(self, *a): pass
+    def nudge_until(self, *a, **k): pass
+    def fail(self, message): raise Exception(message)
+
+
+class TestOpenDockHub(unittest.TestCase):
+    def test_presses_f_again_when_the_hub_did_not_open(self):
+        task = HubOpener(2)
+        task.open_dock_hub()
+        self.assertEqual(2, task.presses)
+
+    def test_fails_after_four_presses(self):
+        task = HubOpener(99)
+        with self.assertRaises(Exception):
+            task.open_dock_hub()
+        self.assertEqual(4, task.presses)
