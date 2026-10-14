@@ -788,8 +788,16 @@ class Equipper(BaitFishingTask):
         self.wheel = list(wheel)
         self.events = []
 
+    hover = [True]
+
     def wheel_open(self):
         return self.wheel.pop(0) if len(self.wheel) > 1 else self.wheel[0]
+
+    def hovering(self, name):
+        return self.hover.pop(0) if len(self.hover) > 1 else self.hover[0]
+
+    def log_info(self, message, notify=False, **kwargs):
+        self.events.append(('log', message))
 
     def send_key_down(self, key, after_sleep=0):
         self.events.append(('down', key))
@@ -1060,3 +1068,22 @@ class TestSweetPuff(unittest.TestCase):
         with self.assertRaises(Exception) as ctx:
             Puffer(211, False).try_sweet_puff()
         self.assertIn('Fishing Complete', str(ctx.exception))
+
+
+class TestEquipHover(unittest.TestCase):
+    def test_repoints_until_the_name_shows_under_the_cursor(self):
+        task = Equipper([True, False])
+        task.hover = [False, True]
+        task.equip('baiting')
+        points = [e for e in task.events if e[0] == 'point']
+        self.assertEqual([('point', 0.5, 0.5), ('point', 0.601, 0.319), ('point', 0.5, 0.5), ('point', 0.601, 0.319)],
+                         points)
+        self.assertEqual(('up', 'tab'), task.events[-1])
+
+    def test_releases_anyway_after_three_misses(self):
+        task = Equipper([True, False])
+        task.hover = [False]
+        task.equip('baiting')
+        self.assertEqual(3, len([e for e in task.events if e == ('point', 0.601, 0.319)]))
+        self.assertTrue(any(e[0] == 'log' for e in task.events))
+        self.assertEqual(('up', 'tab'), task.events[-1])

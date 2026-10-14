@@ -89,8 +89,13 @@ class BaitFishingTask(FishingTask):
     # ---- utilities -----------------------------------------------------
 
     def wheel_open(self):
-        # the utility counts printed on the wheel only exist while it is open
-        return parse_count(self.texts(*ui.WHEEL_BOX)) is not None
+        # the utility counts and the centre's "Release to switch" only exist while the wheel is open
+        return (parse_count(self.texts(*ui.WHEEL_BOX)) is not None
+                or self.has_text(r'Release\s*to\s*switch', *ui.WHEEL_CENTER_BOX))
+
+    def hovering(self, name):
+        # the wheel's centre prints the name of the utility under the cursor
+        return self.wait_until(lambda: self.has_text(ui.UTILITY_NAMES[name], *ui.WHEEL_CENTER_BOX), time_out=1.5)
 
     def point_cursor(self, fx, fy):
         # the wheel picks the slot under the real cursor when the key is released (see CombatCheck's tab wheel)
@@ -110,8 +115,15 @@ class BaitFishingTask(FishingTask):
             self.sleep(random.uniform(0.3, 0.6))
             self.point_cursor(0.5, 0.5)       # the wheel reads the move from its centre, wherever the cursor was parked
             self.sleep(random.uniform(0.2, 0.4))
-            self.point_cursor(*ui.UTILITY_SLOTS[name])
-            self.sleep(random.uniform(0.4, 0.8))
+            for _ in range(3):
+                self.point_cursor(*ui.UTILITY_SLOTS[name])
+                self.sleep(random.uniform(0.4, 0.8))
+                if self.hovering(name):
+                    break
+                self.point_cursor(0.5, 0.5)
+                self.sleep(random.uniform(0.2, 0.4))
+            else:
+                self.log_info(f'the wheel never showed {name} under the cursor, releasing anyway')
         finally:
             self.send_key_up(wheel_key)
         self.sleep(random.uniform(0.4, 0.7))
