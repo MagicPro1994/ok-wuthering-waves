@@ -134,7 +134,35 @@ class BaitFishingTask(FishingTask):
             self.fail('Sandworm launched message did not show')
         self.sleep(random.uniform(0.6, 1.2))
 
-    def catch_fish(self): raise NotImplementedError
+    def catch_fish(self):
+        if self.try_sweet_puff():
+            return
+        self.fish_normally()
+
+    def try_sweet_puff(self):
+        self.info_set('current task', 'sweet puff')
+        self.equip('sweet_puff')
+        if not (self.utility_count() or 0) > 0:
+            return False
+        self.send_key(self.key_config.get('Tool Key'), after_sleep=random.uniform(0.8, 1.3))
+        if not self.wait_until(lambda: self.has_text('Fishing Complete'), time_out=20):
+            self.fail('Fishing Complete did not show after using Sweet Puff')
+        self.sleep(random.uniform(0.8, 1.4))
+        self.click_at(*ui.FISHING_COMPLETE_CLOSE_AT, after_sleep=random.uniform(1.0, 1.6))
+        return True
+
+    def fish_normally(self):
+        self.info_set('current task', 'fish')
+        self.nudge_until('w', lambda: prompt_state(self.prompt_texts()).fish, tries=8, label='the Fish prompt')
+        self.select_entry(r'(?<![A-Za-z])Fish(?![A-Za-z])', 'Fish')
+        self.send_key('f', after_sleep=random.uniform(0.8, 1.4))
+        # the mini-game finishes by itself in 15 to 30 s and opens the Cargo screen
+        if not self.wait_until(self.cargo_screen_open, time_out=75):
+            self.fail('mini-game did not reach the Cargo screen')
+        self.sleep(random.uniform(0.6, 1.0))
+
+    def cargo_screen_open(self):
+        return self.has_text(r'Cargo|Catch', 0.0, 0.0, 0.6, 0.15)
     def load_cargo(self): raise NotImplementedError
     def return_to_dock(self):
         self.info_set('current task', 'return to dock')

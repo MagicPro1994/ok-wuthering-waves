@@ -104,3 +104,28 @@ class TestNudge(unittest.TestCase):
             task.nudge_until('s', lambda: task.states.pop(0), tries=3, label='the dock prompt')
         self.assertIn('the dock prompt', str(ctx.exception))
         self.assertEqual(3, len(task.presses))
+
+
+class Catcher(BaitFishingTask):
+    def __init__(self, puff):
+        self.puff = puff
+        self.calls = []
+
+    def try_sweet_puff(self):
+        self.calls.append('puff')
+        return self.puff
+
+    def fish_normally(self):
+        self.calls.append('normal')
+
+
+class TestCatchFish(unittest.TestCase):
+    def test_uses_sweet_puff_when_available(self):
+        task = Catcher(True)
+        task.catch_fish()
+        self.assertEqual(['puff'], task.calls)
+
+    def test_falls_back_to_normal_fishing(self):
+        task = Catcher(False)
+        task.catch_fish()
+        self.assertEqual(['puff', 'normal'], task.calls)
