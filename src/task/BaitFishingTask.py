@@ -3,9 +3,10 @@ import time
 
 from ok import Logger
 
-from src.fishing import bait_ui as ui, detect, human_input as hi
+from src.fishing import bait_ui as ui, cargo_grid as cg, detect, human_input as hi
 from src.fishing.bait_logic import (RoundGuard, dialog_open, entry_selected, parse_count, prompt_state,
                                     sandworm_launched)
+from src.fishing.cargo_plan import Catch, grab_and_drop, plan_cargo, shape_matches
 from src.fishing.real_input import RealInput
 from src.task.FishingTask import FishingTask
 from src.task.WWOneTimeTask import WWOneTimeTask
@@ -163,7 +164,61 @@ class BaitFishingTask(FishingTask):
 
     def cargo_screen_open(self):
         return self.has_text(r'Cargo|Catch', 0.0, 0.0, 0.6, 0.15)
-    def load_cargo(self): raise NotImplementedError
+
+    def load_cargo(self):
+        self.info_set('current task', 'load cargo')
+        if not self.wait_until(self.cargo_screen_open, time_out=15):
+            self.fail('Cargo screen not open')
+        self.sleep(random.uniform(0.6, 1.0))
+        base = self.rgb_frame()
+        occupied = cg.occupied_cells(base)
+        catches = self.survey_catches(base)
+        plan = plan_cargo(cg.free_cells(occupied), catches)
+        self.log_info(f'cargo: {len(plan)} of {len(catches)} catches placed')
+        for catch, placement in plan:
+            self.place_catch(catch, placement, base)
+        self.click_at(*ui.FINISH_AT, after_sleep=random.uniform(1.0, 1.6))
+
+    def survey_catches(self, base):
+        # Click every card slot, read the shape from the preview and the value from the card; stop at the first
+        # slot that shows no preview (past the last fish).
+        catches = []
+        for slot in range(cg.MAX_CARDS):
+            self.click_at(*cg.card_center(slot), after_sleep=random.uniform(0.6, 0.9))
+            cells = cg.read_preview(base, self.rgb_frame())
+            if not cells:
+                break
+            value = cg.parse_value(self.texts(*cg.card_box(slot))) or 0
+            catches.append(Catch(slot, cells, value))
+        return catches
+
+    def place_catch(self, catch, placement, base):
+        self.click_at(*cg.card_center(catch.slot), after_sleep=random.uniform(0.6, 0.9))
+        cells = cg.read_preview(base, self.rgb_frame())
+        # rotate by re-reading the preview, never by counting presses: the rotation direction is the game's
+        for _ in range(4):
+            if shape_matches(cells, placement):
+                break
+            self.send_key('r', after_sleep=random.uniform(0.4, 0.7))
+            cells = cg.read_preview(base, self.rgb_frame())
+        else:
+            self.log_info(f'slot {catch.slot}: could not rotate to the planned shape, leaving it')
+            return
+        if cells != placement.cells:
+            grab, drop = grab_and_drop(cells, placement)
+            src, dst = cg.cell_center(*grab), cg.cell_center(*drop)
+            self.real.drag(src[0], src[1], dst[0], dst[1], random.uniform(0.8, 1.1))
+            self.sleep(random.uniform(0.5, 0.8))
+            if cg.read_preview(base, self.rgb_frame()) != placement.cells:
+                self.log_info(f'slot {catch.slot}: preview did not land on the planned cells, leaving it')
+                return
+        self.send_key('space', after_sleep=random.uniform(0.5, 0.9))
+
+    def release_selected_fish(self):
+        # `FishingTask.sell_all` calls this when Sell All refuses because a fish is still selected. After
+        # `Finish` nothing should be selected, so treat it as a fault until a live run shows otherwise.
+        self.fail('a fish is still selected at the Dock Shop')
+
     def return_to_dock(self):
         self.info_set('current task', 'return to dock')
         self.nudge_until('s', lambda: prompt_state(self.prompt_texts()).return_dock,

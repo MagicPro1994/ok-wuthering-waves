@@ -1,5 +1,8 @@
 import unittest
 
+import numpy as np
+
+from src.fishing import cargo_grid as cg
 from src.task.BaitFishingTask import BaitFishingTask
 
 
@@ -129,3 +132,40 @@ class TestCatchFish(unittest.TestCase):
         task = Catcher(False)
         task.catch_fish()
         self.assertEqual(['puff', 'normal'], task.calls)
+
+
+class Surveyor(BaitFishingTask):
+    def __init__(self, shapes):
+        self.shapes = shapes          # slot -> list of cells (a missing slot has no preview)
+        self.clicked = []
+        self.current = None
+
+    def click_at(self, fx, fy, after_sleep=0.4):
+        self.clicked.append((fx, fy))
+        slots = [cg.card_center(s) for s in range(cg.MAX_CARDS)]
+        self.current = min(range(cg.MAX_CARDS), key=lambda s: abs(slots[s][0] - fx) + abs(slots[s][1] - fy))
+
+    def rgb_frame(self):
+        frame = np.full((1080, 1920, 3), 52, np.uint8)
+        for r, c in self.shapes.get(self.current, []):
+            x, y = cg.cell_center(r, c)
+            frame[int(y * 1080) - 30:int(y * 1080) + 30, int(x * 1920) - 30:int(x * 1920) + 30] = (90, 160, 230)
+        return frame
+
+    def texts(self, x=0, y=0, to_x=1, to_y=1):
+        return ["1,200"]
+
+    def sleep(self, seconds):
+        pass
+
+
+class TestSurvey(unittest.TestCase):
+    def test_reads_shapes_and_stops_at_the_first_empty_slot(self):
+        shapes = {0: [(2, 2), (2, 3)], 1: [(3, 3), (4, 3), (4, 4)]}
+        task = Surveyor(shapes)
+        base = np.full((1080, 1920, 3), 52, np.uint8)
+        catches = task.survey_catches(base)
+        self.assertEqual([0, 1], [c.slot for c in catches])
+        self.assertEqual(frozenset({(2, 2), (2, 3)}), catches[0].cells)
+        self.assertEqual(1200, catches[0].value)
+        self.assertEqual(3, len(task.clicked))     # slot 2 was probed and found empty
