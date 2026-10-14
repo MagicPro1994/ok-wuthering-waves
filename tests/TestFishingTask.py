@@ -57,6 +57,18 @@ class TestPremiumAvailable(unittest.TestCase):
         self.assertFalse(premium_available([]))
 
 
+class TestHubAnchor(unittest.TestCase):
+    def test_matches_what_ocr_reads_on_the_hub(self):
+        from src.task.FishingTask import HUB_ANCHOR
+        # live OCR of the dock hub: the bubble icon makes "Dock Shop" read as "DockShop"
+        for texts in (["Dock", "Fame", "DockShop", "Set Sail!"], ["DockShop"], ["Set Sail!"]):
+            self.assertTrue(any(HUB_ANCHOR.search(t) for t in texts), texts)
+
+    def test_does_not_match_the_open_world(self):
+        from src.task.FishingTask import HUB_ANCHOR
+        self.assertFalse(any(HUB_ANCHOR.search(t) for t in ["Planck", "Check the dock", "16776/16776"]))
+
+
 class TestTrackAction(unittest.TestCase):
     def test_track_button(self):
         self.assertEqual('track', track_action(["Track"]))

@@ -15,6 +15,9 @@ from src.task.WWOneTimeTask import WWOneTimeTask
 logger = Logger.get_logger(__name__)
 
 
+HUB_ANCHOR = re.compile(r'Fame|Set\s*Sail|Dock\s*Shop', re.IGNORECASE)   # OCR reads "Dock Shop" as "DockShop"
+
+
 def next_action(error_deg, target_found):
     if not target_found:
         return 'lost'
@@ -148,8 +151,7 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
 
     def pick_premium(self):
         # Dock hub -> "Fishing Request"; select the premium entry and track it unless it already is.
-        self.wait_ocr(match=re.compile('Dock Shop', re.I), time_out=20, raise_if_not_found=True,
-                      settle_time=0.8)
+        self.wait_ocr(match=HUB_ANCHOR, time_out=20, raise_if_not_found=True, settle_time=0.8)
         # Nothing tracked: the hub shows a "Fishing Request" row. A tracked request replaces it with its own
         # panel, whose "..." opens the same Fishing Request screen.
         if not self.click_ocr_text('Fishing Request', 0.0, 0.1, 0.5, 0.4):
