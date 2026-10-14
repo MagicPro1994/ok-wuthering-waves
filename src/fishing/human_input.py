@@ -48,6 +48,10 @@ def approach_press(rng=_random):
     return rng.uniform(0.8, 1.5)
 
 
+def nudge_press(rng=_random):
+    return rng.uniform(0.35, 0.8)
+
+
 def cruise_gap(rng=_random):
     """Seconds of continuous W before a person eases off it for a moment."""
     return rng.uniform(9.0, 16.0)
