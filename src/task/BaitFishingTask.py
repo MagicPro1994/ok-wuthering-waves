@@ -176,7 +176,7 @@ class BaitFishingTask(FishingTask):
         plan = plan_cargo(cg.free_cells(occupied), catches)
         self.log_info(f'cargo: {len(plan)} of {len(catches)} catches placed')
         for catch, placement in plan:
-            self.place_catch(catch, placement, base)
+            self.place_catch(catch, placement)
         self.click_at(*ui.FINISH_AT, after_sleep=random.uniform(1.0, 1.6))
 
     def survey_catches(self, base):
@@ -188,11 +188,16 @@ class BaitFishingTask(FishingTask):
             cells = cg.read_preview(base, self.rgb_frame())
             if not cells:
                 break
-            value = cg.parse_value(self.texts(*cg.card_box(slot))) or 0
+            value = cg.parse_value(self.texts(*cg.card_box(slot)))
+            if value is None:
+                self.log_info(f'slot {slot}: card value unreadable, counting it as 0')
+                value = 0
             catches.append(Catch(slot, cells, value))
         return catches
 
-    def place_catch(self, catch, placement, base):
+    def place_catch(self, catch, placement):
+        # a fresh base for every card: earlier placements are part of the cargo now and must not read as preview
+        base = self.rgb_frame()
         self.click_at(*cg.card_center(catch.slot), after_sleep=random.uniform(0.6, 0.9))
         cells = cg.read_preview(base, self.rgb_frame())
         # rotate by re-reading the preview, never by counting presses: the rotation direction is the game's

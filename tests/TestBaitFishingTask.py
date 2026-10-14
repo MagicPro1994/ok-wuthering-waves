@@ -3,6 +3,8 @@ import unittest
 import numpy as np
 
 from src.fishing import cargo_grid as cg
+from src.fishing.cargo_packer import Placement
+from src.fishing.cargo_plan import Catch
 from src.task.BaitFishingTask import BaitFishingTask
 
 
@@ -169,3 +171,49 @@ class TestSurvey(unittest.TestCase):
         self.assertEqual(frozenset({(2, 2), (2, 3)}), catches[0].cells)
         self.assertEqual(1200, catches[0].value)
         self.assertEqual(3, len(task.clicked))     # slot 2 was probed and found empty
+
+
+class Placer(Surveyor):
+    """Cards preview their shape when clicked; `space` commits the preview to the cargo for good."""
+
+    def __init__(self, shapes):
+        super().__init__(shapes)
+        self.placed = set()
+        self.keys = []
+        self.notes = []
+
+    def rgb_frame(self):
+        frame = super().rgb_frame()
+        for r, c in self.placed:
+            x, y = cg.cell_center(r, c)
+            frame[int(y * 1080) - 30:int(y * 1080) + 30, int(x * 1920) - 30:int(x * 1920) + 30] = (90, 160, 230)
+        return frame
+
+    def send_key(self, key, after_sleep=0.2, **kwargs):
+        self.keys.append(key)
+        if key == 'space':
+            self.placed |= set(self.shapes[self.current])
+            self.current = None
+
+    def log_info(self, message, notify=False, **kwargs):
+        self.notes.append(message)
+
+
+class TestPlaceCatch(unittest.TestCase):
+    def test_second_catch_is_placed_after_the_first(self):
+        shapes = {1: [(2, 2), (2, 3)], 0: [(5, 5), (6, 5)]}
+        task = Placer(shapes)
+        for slot in (1, 0):
+            cells = frozenset(shapes[slot])
+            task.place_catch(Catch(slot, cells, 100), Placement(0, cells, min(cells)))
+        self.assertEqual(['space', 'space'], task.keys)
+        self.assertEqual({(2, 2), (2, 3), (5, 5), (6, 5)}, task.placed)
+
+
+class TestSurveyValue(unittest.TestCase):
+    def test_unreadable_value_is_logged_and_kept_at_zero(self):
+        task = Placer({0: [(2, 2)]})
+        task.texts = lambda *a, **k: ['??']
+        catches = task.survey_catches(np.full((1080, 1920, 3), 52, np.uint8))
+        self.assertEqual(0, catches[0].value)
+        self.assertTrue(any('value' in n for n in task.notes))
