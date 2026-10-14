@@ -54,6 +54,41 @@ def read_preview(before: np.ndarray, after: np.ndarray, threshold: float = 18.0)
     return frozenset(found)
 
 
+DIM_RESIDUAL = 15.0     # mean abs error of the "same cell, just dimmed" model above which a cell really changed
+
+
+def _is_dimmed(before: np.ndarray, after: np.ndarray, row: int, col: int) -> bool:
+    """True when `after` is `before` scaled by one factor: a placed fish dimmed while a draft is up."""
+    x0, y0, x1, y1 = _interior(row, col)
+    b = before[y0:y1, x0:x1].astype(float).reshape(-1, 3)
+    a = after[y0:y1, x0:x1].astype(float).reshape(-1, 3)
+    denom = (b * b).sum()
+    if denom == 0:
+        return False
+    k = (a * b).sum() / denom
+    return float(np.abs(a - k * b).mean()) < DIM_RESIDUAL
+
+
+def read_draft(before: np.ndarray, after: np.ndarray, occupied: Iterable[Cell]) -> FrozenSet[Cell]:
+    """Cells of the draft showing in `after`, against `before` (no draft showing) with `occupied` its placed cells.
+
+    While a draft is up the game dims every placed fish, so those cells change too. An occupied cell only counts when
+    the change is more than a dimming (the draft sits on it, tinted); then cells hidden under the fish art are filled in.
+    """
+    occupied = set(occupied)
+    found = set()
+    for cell in read_preview(before, after):
+        if cell not in occupied or not _is_dimmed(before, after, *cell):
+            found.add(cell)
+    for r in range(GRID_ROWS):
+        for c in range(GRID_COLS):
+            if (r, c) in found or (r, c) in BLOCKED:
+                continue
+            if all(n in found for n in ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1))):
+                found.add((r, c))
+    return frozenset(found)
+
+
 def occupied_cells(rgb: np.ndarray, threshold: float = 18.0) -> FrozenSet[Cell]:
     empty = np.array(EMPTY_RGB, dtype=int)
     found = set()

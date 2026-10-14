@@ -101,6 +101,35 @@ class TestRealDrafts(unittest.TestCase):
         self.assertEqual(frozenset(), cg.read_preview(base, base))
 
 
+class TestReadDraft(unittest.TestCase):
+    def test_snail_over_an_empty_cargo(self):
+        draft = cg.read_draft(fixture("cargo_catches_base.png"), fixture("cargo_draft_snail.png"), frozenset())
+        self.assertEqual(frozenset({(0, 0), (0, 1), (1, 0), (1, 1), (1, 2), (2, 1)}), draft)
+
+    def test_draft_over_placed_fish_ignores_the_dimmed_ones(self):
+        base = fixture("cargo_placed_base.png")
+        after = fixture("cargo_draft_eel_over_placed.png")
+        self.assertEqual(frozenset({(0, 0), (0, 1), (1, 0), (1, 1)}), cg.read_draft(base, after, cg.occupied_cells(base)))
+
+    def test_placed_fish_alone_are_occupied(self):
+        base = fixture("cargo_placed_base.png")
+        self.assertEqual(12, len(cg.occupied_cells(base)))
+
+    def test_no_draft_reads_nothing(self):
+        base = fixture("cargo_placed_base.png")
+        self.assertEqual(frozenset(), cg.read_draft(base, base, cg.occupied_cells(base)))
+
+    def test_a_plus_centre_hidden_under_art_is_filled_in(self):
+        base = fixture("cargo_empty.png")
+        after = paint(base, [(2, 3), (3, 2), (3, 4), (4, 3)])      # the centre (3, 3) was left as it was
+        self.assertEqual(frozenset({(2, 3), (3, 2), (3, 3), (3, 4), (4, 3)}), cg.read_draft(base, after, frozenset()))
+
+    def test_blocked_cells_are_not_filled(self):
+        base = fixture("cargo_empty.png")
+        after = paint(base, [(0, 1), (1, 0)])
+        self.assertNotIn((0, 0), cg.read_draft(base, after, frozenset()))
+
+
 class TestParseCargoUsed(unittest.TestCase):
     def test_cases(self):
         self.assertEqual(7, cg.parse_cargo_used(["Cargo: 7/52"]))

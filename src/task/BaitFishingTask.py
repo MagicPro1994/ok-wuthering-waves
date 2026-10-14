@@ -223,6 +223,8 @@ class BaitFishingTask(FishingTask):
         for _ in range(self.LOAD_PASSES):
             occupied = cg.occupied_cells(self.rgb_frame())
             catches = self.survey_catches()
+            for catch in catches:
+                self.log_info(f'cargo survey: slot {catch.slot} value {catch.value} cells {sorted(catch.cells)}')
             plan = plan_cargo(cg.free_cells(occupied), catches)
             self.log_info(f'cargo: {len(plan)} of {len(catches)} catches placed')
             self.log_info('cargo plan: ' + ', '.join(f'slot {c.slot} value {c.value} -> {sorted(p.cells)}' for c, p in plan))
@@ -247,11 +249,12 @@ class BaitFishingTask(FishingTask):
         # the previous draft in place and has no value.
         base = self.rgb_frame()
         self.clean_base = base
+        occupied = cg.occupied_cells(base)
         catches = []
         previous = frozenset()
         for slot in range(cg.MAX_CARDS):
             self.click_at(*cg.card_center(slot), after_sleep=random.uniform(0.6, 0.9))
-            cells = cg.read_preview(base, self.rgb_frame())
+            cells = cg.read_draft(base, self.rgb_frame(), occupied)
             if slot == 0:
                 self.screenshot('cargo_first_card')
             value = cg.parse_value(self.texts(*cg.card_box(slot)))
@@ -288,8 +291,9 @@ class BaitFishingTask(FishingTask):
         # a survey the last probed card's draft is still up, so that first placement uses the survey's own base
         base = self.clean_base if self.clean_base is not None else self.settled_frame()
         self.clean_base = None
+        occupied = cg.occupied_cells(base)
         self.click_at(*cg.card_center(catch.slot), after_sleep=random.uniform(0.6, 0.9))
-        cells = cg.read_preview(base, self.rgb_frame())
+        cells = cg.read_draft(base, self.rgb_frame(), occupied)
         if not cells:
             self.log_info(f'slot {catch.slot}: no draft showed after clicking its card, leaving it')
             return False
@@ -298,7 +302,7 @@ class BaitFishingTask(FishingTask):
             if shape_matches(cells, placement):
                 break
             self.send_key('r', after_sleep=random.uniform(0.4, 0.7))
-            cells = cg.read_preview(base, self.rgb_frame())
+            cells = cg.read_draft(base, self.rgb_frame(), occupied)
         else:
             self.log_info(f'slot {catch.slot}: could not rotate to the planned shape, leaving it')
             return False
@@ -311,7 +315,7 @@ class BaitFishingTask(FishingTask):
             src, dst = cg.cell_center(*grab), cg.cell_center(*drop)
             self.real.drag(src[0], src[1], dst[0], dst[1], random.uniform(0.8, 1.1))
             self.sleep(random.uniform(0.5, 0.8))
-            landed = cg.read_preview(base, self.rgb_frame())
+            landed = cg.read_draft(base, self.rgb_frame(), occupied)
             if landed != placement.cells:
                 self.screenshot('cargo_after_drag')
                 self.log_info(f'slot {catch.slot}: the draft did not land on the planned cells, leaving it: '

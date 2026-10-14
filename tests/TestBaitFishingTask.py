@@ -179,9 +179,11 @@ class Surveyor(BaitFishingTask):
 
     def rgb_frame(self):
         frame = np.full((1080, 1920, 3), 52, np.uint8)
-        for r, c in set(self.draft) | set(self.placed):
-            x, y = cg.cell_center(r, c)
-            frame[int(y * 1080) - 30:int(y * 1080) + 30, int(x * 1920) - 30:int(x * 1920) + 30] = (90, 160, 230)
+        # while a draft is up the game dims every placed fish
+        for cells, colour in ((self.placed, (60, 107, 153) if self.draft else (90, 160, 230)), (self.draft, (90, 160, 230))):
+            for r, c in cells:
+                x, y = cg.cell_center(r, c)
+                frame[int(y * 1080) - 30:int(y * 1080) + 30, int(x * 1920) - 30:int(x * 1920) + 30] = colour
         return frame
 
     def texts(self, x=0, y=0, to_x=1, to_y=1):
@@ -235,6 +237,14 @@ class TestSurvey(unittest.TestCase):
         with self.assertRaises(Exception) as ctx:
             task.survey_catches()
         self.assertIn('slot 0', str(ctx.exception))
+
+
+class TestSurveyOverPlacedFish(unittest.TestCase):
+    def test_dimmed_placed_fish_are_not_part_of_the_draft(self):
+        task = Surveyor({0: [(0, 0), (0, 1)], 1: [(0, 0), (1, 0), (1, 1)]})
+        task.placed = {(3, 3), (3, 4), (4, 4)}
+        catches = task.survey_catches()
+        self.assertEqual([frozenset({(0, 0), (0, 1)}), frozenset({(0, 0), (1, 0), (1, 1)})], [c.cells for c in catches])
 
 
 class TestSurveyValue(unittest.TestCase):
