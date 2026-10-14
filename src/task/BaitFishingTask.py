@@ -173,7 +173,9 @@ class BaitFishingTask(FishingTask):
         self.send_key(self.key_config.get('Tool Key'), after_sleep=random.uniform(0.8, 1.3))
         if not self.wait_until(lambda: dialog_open(self.texts(0.2, 0.1, 0.8, 0.5)), time_out=10):
             self.fail('Use Bait dialog did not open')
-        self.click_at(*ui.CONFIRM_AT, after_sleep=random.uniform(0.8, 1.2))
+        if not self.click_ocr_text(r'^\s*Confirm\s*$'):
+            self.fail('Confirm button not found in the Use Bait dialog')
+        self.sleep(random.uniform(0.8, 1.2))
         if not self.wait_until(lambda: sandworm_launched(self.texts()), time_out=20):
             self.fail('Sandworm launched message did not show')
         self.sleep(random.uniform(0.6, 1.2))

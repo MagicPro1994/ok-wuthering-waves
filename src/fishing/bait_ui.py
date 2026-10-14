@@ -10,6 +10,5 @@ COUNT_BOX = (0.86, 0.85, 0.945, 0.925)   # measured on a live frame: digits "217
 PROMPT_BOX = (0.45, 0.45, 0.95, 0.8)
 PROMPT_SCROLL_AT = (0.7, 0.6)
 SCROLL_DOWN = -1
-CONFIRM_AT = (0.79, 0.855)
 FISHING_COMPLETE_CLOSE_AT = (0.5, 0.78)
 FINISH_AT = (0.293, 0.91)

@@ -401,3 +401,51 @@ class TestEquip(unittest.TestCase):
         with self.assertRaises(Exception) as ctx:
             Equipper([True]).equip('sweet_puff')
         self.assertIn('did not close', str(ctx.exception))
+
+
+class Launcher(BaitFishingTask):
+    class _Keys:
+        def get(self, key):
+            return 't'
+
+    key_config = _Keys()
+
+    def __init__(self, confirm_found):
+        self.confirm_found = confirm_found
+        self.events = []
+
+    def info_set(self, *args, **kwargs):
+        pass
+
+    def equip(self, name):
+        self.events.append(('equip', name))
+
+    def send_key(self, key, after_sleep=0):
+        self.events.append(('key', key))
+
+    def wait_until(self, condition, time_out=10):
+        return True
+
+    def click_ocr_text(self, pattern, *region):
+        self.events.append(('confirm', pattern))
+        return self.confirm_found
+
+    def sleep(self, seconds):
+        pass
+
+    def fail(self, message):
+        raise Exception(message)
+
+
+class TestLaunchBait(unittest.TestCase):
+    def test_equips_baiting_presses_the_tool_key_and_clicks_confirm_by_text(self):
+        task = Launcher(True)
+        task.launch_bait()
+        self.assertEqual(['equip', 'key', 'confirm'], [e[0] for e in task.events])
+        self.assertEqual(('equip', 'baiting'), task.events[0])
+        self.assertEqual(('key', 't'), task.events[1])
+
+    def test_fails_when_confirm_is_not_found(self):
+        with self.assertRaises(Exception) as ctx:
+            Launcher(False).launch_bait()
+        self.assertIn('Confirm', str(ctx.exception))
