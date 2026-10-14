@@ -215,6 +215,8 @@ class BaitFishingTask(FishingTask):
         if not self.wait_until(self.cargo_screen_open, time_out=15):
             self.fail('Cargo screen not open')
         self.sleep(random.uniform(0.6, 1.0))
+        self.screenshot('cargo_screen')   # kept for measuring the card and grid geometry
+        self.calibrate_cards()
         base = self.rgb_frame()
         occupied = cg.occupied_cells(base)
         catches = self.survey_catches(base)
@@ -223,21 +225,34 @@ class BaitFishingTask(FishingTask):
         placed = set()
         for catch, placement in plan:
             if not self.place_catch(catch, placement, base, placed):
-                self.log_info(f'cargo: slot {catch.slot} was not placed, leaving the rest as they are')
-                break
+                # Finish with fish still unplaced loses them: stop with the Cargo screen open instead
+                self.fail(f'cargo: slot {catch.slot} could not be placed; Cargo screen left open, Finish not pressed')
             placed |= placement.cells
         self.click_at(*ui.FINISH_AT, after_sleep=random.uniform(1.0, 1.6))
+
+    card_origin = None
+
+    def calibrate_cards(self):
+        # the Catch List's position is found from the value texts of its cards (digits at each card's bottom left)
+        boxes = self.ocr(*cg.CARD_REGION) or []
+        self.card_origin = cg.calibrate_card_origin(
+            (box.name, box.x, box.y + box.height / 2) for box in boxes)
+        if self.card_origin is None:
+            self.fail('no catch values found on the Catch List')
+        self.log_info(f'cargo: first card centre at {self.card_origin}')
 
     def survey_catches(self, base):
         # Click every card slot, read the shape from the preview and the value from the card; stop at the first
         # slot that shows no preview (past the last fish).
         catches = []
         for slot in range(cg.MAX_CARDS):
-            self.click_at(*cg.card_center(slot), after_sleep=random.uniform(0.6, 0.9))
+            self.click_at(*cg.card_center(slot, self.card_origin), after_sleep=random.uniform(0.6, 0.9))
             cells = cg.read_preview(base, self.rgb_frame())
+            if slot == 0:
+                self.screenshot('cargo_first_card')
             if not cells:
                 break
-            value = cg.parse_value(self.texts(*cg.card_box(slot)))
+            value = cg.parse_value(self.texts(*cg.card_box(slot, self.card_origin)))
             if value is None:
                 self.log_info(f'slot {slot}: card value unreadable, counting it as 0')
                 value = 0
@@ -252,7 +267,7 @@ class BaitFishingTask(FishingTask):
                 self.log_info(f'slot {catch.slot}: a preview from an earlier card is still showing: {sorted(stray)}')
         # a fresh base for every card: earlier placements are part of the cargo now and must not read as preview
         base = self.rgb_frame()
-        self.click_at(*cg.card_center(catch.slot), after_sleep=random.uniform(0.6, 0.9))
+        self.click_at(*cg.card_center(catch.slot, self.card_origin), after_sleep=random.uniform(0.6, 0.9))
         cells = cg.read_preview(base, self.rgb_frame())
         # rotate by re-reading the preview, never by counting presses: the rotation direction is the game's
         for _ in range(4):
@@ -283,4 +298,6 @@ class BaitFishingTask(FishingTask):
         self.info_set('current task', 'return to dock')
         self.nudge_until('s', lambda: prompt_state(self.prompt_texts()).return_dock,
                          tries=12, label='the Return to the dock prompt')
-        self.select_entry(r'return\s+to\s+the\s+dock', 'Return to the dock')
+        if prompt_state(self.prompt_texts()).fish:
+            self.select_entry(r'return\s+to\s+the\s+dock', 'Return to the dock')
+        # a lone entry is always the selected one: its F badge is not reliably read by OCR

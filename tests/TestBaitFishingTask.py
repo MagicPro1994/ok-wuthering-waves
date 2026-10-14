@@ -143,6 +143,9 @@ class Surveyor(BaitFishingTask):
         self.clicked = []
         self.current = None
 
+    def screenshot(self, name=None, **kwargs):
+        pass
+
     def click_at(self, fx, fy, after_sleep=0.4):
         self.clicked.append((fx, fy))
         slots = [cg.card_center(s) for s in range(cg.MAX_CARDS)]
@@ -256,6 +259,15 @@ class Loader(Placer):
     def info_set(self, key, value):
         pass
 
+    def screenshot(self, name=None, **kwargs):
+        pass
+
+    def calibrate_cards(self):
+        pass
+
+    def fail(self, message):
+        raise Exception(message)
+
     def survey_catches(self, base):
         return [Catch(0, frozenset({(2, 2)}), 100), Catch(1, frozenset({(5, 5)}), 200)]
 
@@ -265,12 +277,13 @@ class Loader(Placer):
 
 
 class TestLoadCargo(unittest.TestCase):
-    def test_stops_after_the_first_unplaced_catch_but_still_finishes(self):
+    def test_fails_without_finishing_when_a_catch_cannot_be_placed(self):
         task = Loader({}, [False, True])
-        task.load_cargo()
+        with self.assertRaises(Exception) as ctx:
+            task.load_cargo()
+        self.assertIn('Finish not pressed', str(ctx.exception))
         self.assertEqual([1], task.tried)
-        self.assertTrue(any('not placed' in n for n in task.notes))
-        self.assertEqual(ui.FINISH_AT, task.clicked[-1])
+        self.assertNotIn(ui.FINISH_AT, task.clicked)
 
     def test_places_everything_when_all_succeed(self):
         task = Loader({}, [True, True])
@@ -449,3 +462,36 @@ class TestLaunchBait(unittest.TestCase):
         with self.assertRaises(Exception) as ctx:
             Launcher(False).launch_bait()
         self.assertIn('Confirm', str(ctx.exception))
+
+
+class Docking(Prompter):
+    """return_to_dock with a scripted prompt list."""
+
+    def __init__(self, texts):
+        super().__init__([])
+        self.texts_seen = texts
+        self.selected = []
+
+    def prompt_texts(self):
+        return self.texts_seen
+
+    def nudge_until(self, key, done, tries, label):
+        pass
+
+    def select_entry(self, pattern, label):
+        self.selected.append(label)
+
+    def info_set(self, key, value):
+        pass
+
+
+class TestReturnToDock(unittest.TestCase):
+    def test_a_lone_entry_is_not_scrolled_to(self):
+        task = Docking(["Return to the dock"])
+        task.return_to_dock()
+        self.assertEqual([], task.selected)
+
+    def test_two_entries_select_the_dock_one(self):
+        task = Docking(["Return to the dock", "Fish"])
+        task.return_to_dock()
+        self.assertEqual(['Return to the dock'], task.selected)

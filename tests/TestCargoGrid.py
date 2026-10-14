@@ -81,3 +81,19 @@ class TestCards(unittest.TestCase):
         x, y = cg.card_center(0)
         x0, y0, x1, y1 = cg.card_box(0)
         self.assertTrue(x0 < x < x1 and y0 < y < y1)
+
+
+class TestCalibrate(unittest.TestCase):
+    def test_slot_zero_comes_from_the_top_left_value(self):
+        values = [("1404", 940.0, 400.0), ("4196", 400.0, 400.0), ("2451", 400.0, 602.0), ("New", 700.0, 300.0)]
+        self.assertEqual((460.0, 328.0), cg.calibrate_card_origin(values))
+
+    def test_no_values_is_none(self):
+        self.assertIsNone(cg.calibrate_card_origin([("Catches", 100.0, 50.0)]))
+
+    def test_origin_moves_every_slot(self):
+        x0, y0 = cg.card_center(0, (460.0, 328.0))
+        x4, y4 = cg.card_center(4, (460.0, 328.0))
+        self.assertAlmostEqual((460.0 + cg.CARD_PITCH[0]) / 1920, x4)
+        self.assertAlmostEqual((328.0 + cg.CARD_PITCH[1]) / 1080, y4)
+        self.assertAlmostEqual(460.0 / 1920, x0)
