@@ -20,7 +20,8 @@ def camera_steps(dx, rng=_random):
 
 
 def turn_hold_seconds(error_deg, rng=_random):
-    return jitter_hold(min(abs(error_deg) / 83.0, 0.9), rng)
+    # A/D turn the boat about 80 degrees per second
+    return jitter_hold(min(abs(error_deg) / 80.0, 2.4), rng)
 
 
 def offset_point(x, y, rng=_random, rx=0.004, ry=0.006):

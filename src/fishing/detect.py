@@ -41,6 +41,54 @@ def marker_error_deg(marker_x: float, centre_x: float = 960.0, px_per_deg: float
     return (marker_x - centre_x) / px_per_deg
 
 
+MINIMAP_CENTRE = (130.0, 121.0)     # 1920x1080 frame; the player arrow sits at the minimap centre
+
+
+def _angle(dx: float, dy_down: float) -> float:
+    """Screen angle in degrees: east 0, north 90, anticlockwise positive."""
+    return float(np.degrees(np.arctan2(-dy_down, dx)) % 360)
+
+
+def arrow_heading(rgb: np.ndarray) -> Optional[float]:
+    """Boat heading from the yellow minimap arrow: its narrow end is the tip."""
+    cx, cy = MINIMAP_CENTRE
+    r, g, b = [rgb[:260, :260, i].astype(int) for i in range(3)]
+    yy, xx = np.mgrid[0:260, 0:260]
+    mask = (r > 200) & (g > 150) & (b < 130) & (r - b > 110) & (np.hypot(xx - cx, yy - cy) < 40)
+    ys, xs = np.nonzero(mask)
+    if len(xs) < 40:
+        return None
+    pts = np.stack([xs - xs.mean(), -(ys - ys.mean())], 1).astype(float)
+    axis = np.linalg.eigh(np.cov(pts.T))[1][:, 1]
+    along = pts @ axis
+    lo, hi = along.min(), along.max()
+    side = np.array([-axis[1], axis[0]])
+
+    def width(sel):
+        perp = pts[sel] @ side
+        return perp.max() - perp.min() if sel.any() else 0.0
+
+    tip = axis if width(along > hi - 0.25 * (hi - lo)) < width(along < lo + 0.25 * (hi - lo)) else -axis
+    return _angle(tip[0], -tip[1])
+
+
+def minimap_target_bearing(rgb: np.ndarray) -> Optional[float]:
+    """Bearing of the purple request icon on the minimap, seen from the player arrow."""
+    cx, cy = MINIMAP_CENTRE
+    r, g, b = [rgb[:260, :260, i].astype(int) for i in range(3)]
+    yy, xx = np.mgrid[0:260, 0:260]
+    mask = (r > 120) & (r < 200) & (b > 150) & (g < 110) & (b - g > 60) & (np.hypot(xx - cx, yy - cy) < 100)
+    ys, xs = np.nonzero(mask)
+    if len(xs) < 20:
+        return None
+    return _angle(xs.mean() - cx, ys.mean() - cy)
+
+
+def heading_error(heading: float, bearing: float) -> float:
+    """Degrees to turn: positive means the target is anticlockwise of the heading (turn left)."""
+    return (bearing - heading + 180) % 360 - 180
+
+
 def parse_progress(texts: Iterable[str]) -> Tuple[int, int]:
     done = total = 0
     for text in texts:

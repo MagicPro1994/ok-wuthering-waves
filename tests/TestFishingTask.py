@@ -72,16 +72,16 @@ from src.task.FishingTask import next_action
 
 
 class TestNextAction(unittest.TestCase):
-    def test_no_marker_sweeps(self):
-        self.assertEqual('sweep', next_action(0.0, False))
+    def test_no_target_is_lost(self):
+        self.assertEqual('lost', next_action(0.0, False))
 
     def test_big_error_turns(self):
-        self.assertEqual('turn', next_action(7.5, True))
-        self.assertEqual('turn', next_action(-12.0, True))
+        self.assertEqual('turn', next_action(15.0, True))
+        self.assertEqual('turn', next_action(-170.0, True))
 
     def test_small_error_goes_forward(self):
-        self.assertEqual('forward', next_action(3.9, True))
-        self.assertEqual('forward', next_action(-4.0, True))
+        self.assertEqual('forward', next_action(11.9, True))
+        self.assertEqual('forward', next_action(-12.0, True))
 
 
 class TestSellText(unittest.TestCase):

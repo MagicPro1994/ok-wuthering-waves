@@ -15,10 +15,10 @@ from src.task.WWOneTimeTask import WWOneTimeTask
 logger = Logger.get_logger(__name__)
 
 
-def next_action(error_deg, marker_found):
-    if not marker_found:
-        return 'sweep'
-    return 'turn' if abs(error_deg) > 4 else 'forward'
+def next_action(error_deg, target_found):
+    if not target_found:
+        return 'lost'
+    return 'turn' if abs(error_deg) > 12 else 'forward'
 
 
 def premium_available(texts):
@@ -196,13 +196,13 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
         return total > 0 and done >= total
 
     def sail_to_fish(self):
+        # The boat sails along the yellow minimap arrow and A/D turn it (about 80 degrees per second, the camera
+        # follows). So steer by the arrow against the purple request icon on the minimap, not by the camera.
         self.info_set('current task', 'sail to fish')
         full_px = max(detect.heart_px(self.rgb_frame()), 1)
         last_px = full_px
         reset_done = False
         lost_in_row = 0
-        stuck = 0
-        last_x = None
         while True:
             if self.fish_prompt():
                 return
@@ -215,63 +215,38 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
                 last_px = max(px, 1)
                 continue
             last_px = max(px, 1)
-            marker = detect.find_marker(rgb)
-            err = detect.marker_error_deg(marker[0]) if marker else 0.0
-            action = next_action(err, marker is not None)
-            if action == 'sweep':
+            heading = detect.arrow_heading(rgb)
+            bearing = detect.minimap_target_bearing(rgb)
+            found = heading is not None and bearing is not None
+            err = detect.heading_error(heading, bearing) if found else 0.0
+            action = next_action(err, found)
+            if action == 'lost':
                 lost_in_row += 1
-                if lost_in_row >= 3:
+                if lost_in_row >= 4:
                     if reset_done:
-                        self.fail('fish marker not found after a time reset')
-                    self.sweep_camera()
-                    if detect.find_marker(self.rgb_frame()) is None:
-                        self.set_time_to_night()
-                        reset_done = True
+                        self.fail('request icon not found on the minimap after a time reset')
+                    self.set_time_to_night()
+                    reset_done = True
                     lost_in_row = 0
+                self.sleep(random.uniform(0.4, 0.9))
                 continue
             lost_in_row = 0
             if action == 'turn':
-                self.turn_camera(err)
+                self.turn_boat(err)
             else:
-                if last_x is not None and abs(marker[0] - last_x) < 2 and marker[2] > 0:
-                    stuck += 1
-                else:
-                    stuck = 0
-                last_x = marker[0]
-                if stuck >= 4:
-                    self.reverse_and_turn()
-                    stuck = 0
-                    continue
                 self.hold_key('w', hi.sail_press())
             self.sleep(random.uniform(0.3, 0.8))
 
-    def turn_camera(self, error_deg):
-        # ~2.3 px of marker shift per mouse unit, ~21 px per degree
-        units = int(error_deg * 21.0 / 2.3)
-        self.real.focus()
-        for dx, dy, delay in hi.camera_steps(units):
-            self.real.rel_move(dx, dy)
-            self.sleep(delay)
-
-    def sweep_camera(self):
-        self.real.focus()
-        for dx in hi.sweep_plan():
-            for sx, sy, delay in hi.camera_steps(dx):
-                self.real.rel_move(sx, sy)
-                self.sleep(delay)
-            if detect.find_marker(self.rgb_frame()) is not None:
-                return
-
-    def reverse_and_turn(self):
-        self.hold_key('s', random.uniform(1.0, 2.0))
-        self.turn_camera(random.choice([-1, 1]) * random.uniform(40, 50))
+    def turn_boat(self, error_deg):
+        # positive error: the target is anticlockwise of the heading, so turn left
+        self.send_key('a' if error_deg > 0 else 'd', down_time=hi.turn_hold_seconds(error_deg))
+        self.sleep(hi.short_pause() + 0.3)
 
     def avoid_damage(self):
         # Land, ghost or tornado: back off, turn about 90 degrees away, continue.
         self.hold_key('s', random.uniform(1.0, 2.0))
-        self.turn_camera(random.choice([-1, 1]) * random.uniform(80, 100))
+        self.turn_boat(random.choice([-1, 1]) * random.uniform(80, 100))
         self.hold_key('w', random.uniform(1.5, 2.5))
-
     # ---- deliver and sell ----------------------------------------------
 
     def deliver(self):

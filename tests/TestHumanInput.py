@@ -33,8 +33,9 @@ class TestHumanInput(unittest.TestCase):
         self.assertEqual([], hi.camera_steps(-2, self.rng))
 
     def test_turn_hold_capped(self):
-        self.assertLessEqual(hi.turn_hold_seconds(500, self.rng), 0.9 * 1.08)
-        self.assertAlmostEqual(0.5, hi.turn_hold_seconds(41.5, random.Random(1)), delta=0.04)
+        # the boat turns about 80 degrees per second; a full U-turn is never longer than 2.4 s
+        self.assertLessEqual(hi.turn_hold_seconds(500, self.rng), 2.4 * 1.08)
+        self.assertAlmostEqual(0.5, hi.turn_hold_seconds(40.0, random.Random(1)), delta=0.04)
 
     def test_offset_point_clamped_and_close(self):
         for _ in range(200):
