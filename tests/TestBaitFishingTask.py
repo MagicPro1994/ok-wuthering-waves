@@ -153,6 +153,10 @@ class Surveyor(BaitFishingTask):
         self.placed = set()
         self.notes = []
         self.keys = []
+        self.events = []
+        self.draft_is_valid = True
+        self.autoplaced = []
+        self.q_works = True
 
     def screenshot(self, name=None, **kwargs):
         pass
@@ -173,6 +177,12 @@ class Surveyor(BaitFishingTask):
     def click_at(self, fx, fy, after_sleep=0.4):
         self.clicked.append((fx, fy))
         slot = self.slot_at(fx, fy)
+        self.events.append(('click', slot))
+        if self.draft and self.draft_is_valid:
+            # clicking another card while a valid draft is up auto-places it
+            self.placed |= self.draft
+            self.autoplaced.append(self.selected)
+            self.draft = frozenset()
         if slot in self.shapes:
             self.selected = slot
             self.draft = frozenset(self.shapes[slot])
@@ -184,6 +194,8 @@ class Surveyor(BaitFishingTask):
             for r, c in cells:
                 x, y = cg.cell_center(r, c)
                 frame[int(y * 1080) - 30:int(y * 1080) + 30, int(x * 1920) - 30:int(x * 1920) + 30] = colour
+        if self.draft:
+            frame[945:1025, 1495:1575] = (128, 175, 129)     # the green check of the Space button
         return frame
 
     def texts(self, x=0, y=0, to_x=1, to_y=1):
@@ -194,6 +206,9 @@ class Surveyor(BaitFishingTask):
 
     def send_key(self, key, after_sleep=0.2, **kwargs):
         self.keys.append(key)
+        self.events.append(key)
+        if key == 'q' and self.q_works:
+            self.draft = frozenset()       # back to the list
 
     def sleep(self, seconds):
         pass
@@ -239,6 +254,30 @@ class TestSurvey(unittest.TestCase):
         self.assertIn('slot 0', str(ctx.exception))
 
 
+class TestSurveyReturnsDrafts(unittest.TestCase):
+    def test_every_draft_goes_back_to_the_list_before_the_next_click(self):
+        task = Surveyor({0: [(2, 2), (2, 3)], 1: [(3, 3), (4, 3)], 2: [(5, 5)]})
+        catches = task.survey_catches()
+        self.assertEqual([0, 1, 2], [c.slot for c in catches])
+        self.assertEqual([('click', 0), 'q', ('click', 1), 'q', ('click', 2), 'q', ('click', 3)], task.events)
+        self.assertEqual([], task.autoplaced)
+        self.assertEqual(set(), task.placed)
+
+    def test_the_survey_stops_at_the_first_slot_with_neither_draft_nor_value(self):
+        task = Surveyor({0: [(2, 2)]})
+        self.assertEqual([0], [c.slot for c in task.survey_catches()])
+        self.assertEqual(2, len(task.clicked))
+        self.assertEqual(['q'], task.keys)
+
+    def test_fails_when_q_cannot_clear_a_draft(self):
+        task = Surveyor({0: [(2, 2)]})
+        task.q_works = False
+        with self.assertRaises(Exception) as ctx:
+            task.survey_catches()
+        self.assertIn('could not clear the draft', str(ctx.exception))
+        self.assertNotIn('t', task.keys)
+
+
 class TestSurveyOverPlacedFish(unittest.TestCase):
     def test_dimmed_placed_fish_are_not_part_of_the_draft(self):
         task = Surveyor({0: [(0, 0), (0, 1)], 1: [(0, 0), (1, 0), (1, 1)]})
@@ -266,11 +305,9 @@ class Placer(Surveyor):
         self.rotations = None       # successive draft shapes shown by `r`, if set
         self.slip = (0, 0)          # cells the drop misses the target by
         self.real = self
-        self.events = []
 
     def click_at(self, fx, fy, after_sleep=0.4):
         super().click_at(fx, fy, after_sleep)
-        self.events.append('click')
 
     def texts(self, x=0, y=0, to_x=1, to_y=1):
         if (x, y, to_x, to_y) == cg.CARGO_COUNT_BOX:
@@ -280,7 +317,6 @@ class Placer(Surveyor):
 
     def send_key(self, key, after_sleep=0.2, **kwargs):
         super().send_key(key, after_sleep)
-        self.events.append(key)
         if key == 'r' and self.rotations:
             self.draft = frozenset(self.rotations.pop(0))
         if key == 'space' and self.confirm and self.draft:
@@ -310,7 +346,7 @@ class TestPlaceCatch(unittest.TestCase):
         self.assertEqual([(cg.cell_center(2, 2), cg.cell_center(4, 4))], task.drags)
         self.assertEqual(9, task.used)
         self.assertEqual(want, task.placed)
-        self.assertEqual(['click', 'counter', 'drag', 'space', 'counter'], task.events)
+        self.assertEqual([('click', 1), 'counter', 'drag', 'space', 'counter'], task.events)
         self.assertNotIn('t', task.keys)
 
     def test_a_draft_already_on_target_is_confirmed_without_a_drag(self):
@@ -337,6 +373,8 @@ class TestPlaceCatch(unittest.TestCase):
         task.slip = (0, 1)
         self.assertFalse(task.place_catch(Catch(1, cells, 100), Placement(0, frozenset({(4, 4), (4, 5)}), (4, 4))))
         self.assertNotIn('space', task.keys)
+        self.assertEqual(['q'], task.keys)
+        self.assertFalse(task.draft)
         self.assertTrue(any('did not land' in n for n in task.notes))
 
     def test_returns_false_when_the_counter_does_not_rise(self):
@@ -344,6 +382,8 @@ class TestPlaceCatch(unittest.TestCase):
         task = Placer({1: sorted(cells)}, confirm=False)
         self.assertFalse(task.place_catch(Catch(1, cells, 100), Placement(0, frozenset({(4, 4), (4, 5)}), (4, 4))))
         self.assertTrue(any('counter' in n for n in task.notes))
+        self.assertEqual(['space', 'q'], task.keys)
+        self.assertFalse(task.draft)
 
     def test_returns_false_when_the_counter_is_unreadable(self):
         cells = frozenset({(2, 2)})
@@ -351,6 +391,7 @@ class TestPlaceCatch(unittest.TestCase):
         task.texts = lambda *a, **k: []
         self.assertFalse(task.place_catch(Catch(1, cells, 5), Placement(0, cells, (2, 2))))
         self.assertNotIn('space', task.keys)
+        self.assertEqual(['q'], task.keys)
 
     def test_returns_false_when_the_card_shows_no_draft(self):
         task = Placer({})
@@ -362,17 +403,9 @@ class TestPlaceCatch(unittest.TestCase):
         task = Placer({1: [(2, 2), (2, 3)]})
         want = frozenset({(2, 2), (3, 2), (4, 2)})
         self.assertFalse(task.place_catch(Catch(1, frozenset({(2, 2), (2, 3)}), 5), Placement(0, want, (2, 2))))
-        self.assertEqual(['r'] * 4, task.keys)
+        self.assertEqual(['r'] * 4 + ['q'], task.keys)
+        self.assertFalse(task.draft)
         self.assertEqual([], task.drags)
-
-    def test_the_first_placement_after_a_survey_ignores_the_draft_the_survey_left(self):
-        shapes = {0: [(0, 0), (0, 1)], 1: [(0, 0), (1, 0)]}
-        task = Placer(shapes)
-        catches = task.survey_catches()                  # the last probed card's draft stays up
-        self.assertTrue(task.draft)
-        want = frozenset({(3, 3), (4, 3)})
-        self.assertTrue(task.place_catch(catches[1], Placement(0, want, (3, 3))))
-        self.assertEqual(want, task.placed)
 
 
 class DraftClearer(Surveyor):

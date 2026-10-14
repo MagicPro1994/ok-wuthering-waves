@@ -312,17 +312,14 @@ class BaitFishingTask(FishingTask):
     def cargo_used(self):
         return cg.parse_cargo_used(self.texts(*cg.CARGO_COUNT_BOX))
 
-    clean_base = None    # the last survey's frame without a draft, good until the next confirm
-
     def survey_catches(self):
         # Clicking a card shows its fish as a draft at the top-left of the grid: diff it against the frame without one
-        # (none is showing when the Cargo screen opens). The value is read off the card. A slot without a card leaves
-        # the previous draft in place and has no value.
+        # (the caller cleared any draft). The value is read off the card. Every draft goes back to the list with Q
+        # before the next click: clicking another card while a valid draft is up would auto-place it, and the list
+        # would reflow under the survey.
         base = self.rgb_frame()
-        self.clean_base = base
         occupied = cg.occupied_cells(base)
         catches = []
-        previous = frozenset()
         for slot in range(cg.MAX_CARDS):
             self.click_at(*cg.card_center(slot), after_sleep=random.uniform(0.6, 0.9))
             cells = cg.read_draft(base, self.rgb_frame(), occupied)
@@ -333,13 +330,11 @@ class BaitFishingTask(FishingTask):
                 if value is not None:
                     self.fail(f'cargo: slot {slot} shows a value of {value} but no draft on the grid; nothing was lost')
                 break
-            if value is None and cells == previous:
-                break
+            self.clear_draft()
             if value is None:
                 self.log_info(f'slot {slot}: card value unreadable, using its {len(cells)} cells as the value')
                 value = len(cells)
             catches.append(Catch(slot, cells, value))
-            previous = cells
         return catches
 
     def settled_frame(self):
@@ -358,14 +353,9 @@ class BaitFishingTask(FishingTask):
 
         False means it was left (the caller stops). Never press `t`: that trashes the fish.
         """
-        # placed fish are part of the base and no draft may show in it: a confirm clears the draft, but right after
-        # a survey the last probed card's draft is still up, so that first placement uses the survey's own base
-        if self.clean_base is None:
-            self.clear_draft()
-            base = self.settled_frame()
-        else:
-            base = self.clean_base
-        self.clean_base = None
+        # placed fish are part of the base and no draft may show in it
+        self.clear_draft()
+        base = self.settled_frame()
         occupied = cg.occupied_cells(base)
         self.click_at(*cg.card_center(catch.slot), after_sleep=random.uniform(0.6, 0.9))
         cells = cg.read_draft(base, self.rgb_frame(), occupied)
@@ -380,10 +370,12 @@ class BaitFishingTask(FishingTask):
             cells = cg.read_draft(base, self.rgb_frame(), occupied)
         else:
             self.log_info(f'slot {catch.slot}: could not rotate to the planned shape, leaving it')
+            self.clear_draft()      # a valid draft left up would be auto-placed by the next click
             return False
         used_before = self.cargo_used()
         if used_before is None:
             self.log_info(f'slot {catch.slot}: Cargo counter unreadable, leaving it')
+            self.clear_draft()      # a valid draft left up would be auto-placed by the next click
             return False
         if cells != placement.cells:
             grab, drop = grab_and_drop(cells, placement)
@@ -396,11 +388,13 @@ class BaitFishingTask(FishingTask):
                 self.log_info(f'slot {catch.slot}: the draft did not land on the planned cells, leaving it: '
                               f'planned {sorted(placement.cells)}, read {sorted(landed)}, '
                               f'dragged {sorted(cells)} from {grab} to {drop}')
+                self.clear_draft()      # a valid draft left up would be auto-placed by the next click
                 return False
         self.send_key('space', after_sleep=random.uniform(0.6, 1.0))
         want = used_before + len(placement.cells)
         if not self.wait_until(lambda: self.cargo_used() == want, time_out=self.PLACE_WAIT):
             self.log_info(f'slot {catch.slot}: the Cargo counter did not reach {want}, leaving it')
+            self.clear_draft()      # a valid draft left up would be auto-placed by the next click
             return False
         return True
 
