@@ -1,6 +1,7 @@
 import random
 import time
 
+import numpy as np
 import win32api
 
 from ok import Logger
@@ -224,6 +225,7 @@ class BaitFishingTask(FishingTask):
             catches = self.survey_catches()
             plan = plan_cargo(cg.free_cells(occupied), catches)
             self.log_info(f'cargo: {len(plan)} of {len(catches)} catches placed')
+        self.log_info('cargo plan: ' + ', '.join(f'slot {c.slot} value {c.value} -> {sorted(p.cells)}' for c, p in plan))
             for catch, placement in plan:
                 if not self.place_catch(catch, placement):
                     # Finish with fish still unplaced loses them: stop with the Cargo screen open instead
@@ -266,6 +268,17 @@ class BaitFishingTask(FishingTask):
             previous = cells
         return catches
 
+    def settled_frame(self):
+        # right after a confirm the board still animates: wait for two matching frames before using one as a base
+        frame = self.rgb_frame()
+        for _ in range(6):
+            self.sleep(0.3)
+            following = self.rgb_frame()
+            if np.abs(frame.astype(int) - following.astype(int)).mean() < 1.0:
+                return following
+            frame = following
+        return frame
+
     def place_catch(self, catch, placement):
         """Place one catch: draft it, drag it onto the plan, confirm with Space. True once the Cargo counter rose.
 
@@ -273,7 +286,7 @@ class BaitFishingTask(FishingTask):
         """
         # placed fish are part of the base and no draft may show in it: a confirm clears the draft, but right after
         # a survey the last probed card's draft is still up, so that first placement uses the survey's own base
-        base = self.clean_base if self.clean_base is not None else self.rgb_frame()
+        base = self.clean_base if self.clean_base is not None else self.settled_frame()
         self.clean_base = None
         self.click_at(*cg.card_center(catch.slot), after_sleep=random.uniform(0.6, 0.9))
         cells = cg.read_preview(base, self.rgb_frame())
@@ -298,8 +311,12 @@ class BaitFishingTask(FishingTask):
             src, dst = cg.cell_center(*grab), cg.cell_center(*drop)
             self.real.drag(src[0], src[1], dst[0], dst[1], random.uniform(0.8, 1.1))
             self.sleep(random.uniform(0.5, 0.8))
-            if cg.read_preview(base, self.rgb_frame()) != placement.cells:
-                self.log_info(f'slot {catch.slot}: the draft did not land on the planned cells, leaving it')
+            landed = cg.read_preview(base, self.rgb_frame())
+            if landed != placement.cells:
+                self.screenshot('cargo_after_drag')
+                self.log_info(f'slot {catch.slot}: the draft did not land on the planned cells, leaving it: '
+                              f'planned {sorted(placement.cells)}, read {sorted(landed)}, '
+                              f'dragged {sorted(cells)} from {grab} to {drop}')
                 return False
         self.send_key('space', after_sleep=random.uniform(0.6, 1.0))
         want = used_before + len(placement.cells)
