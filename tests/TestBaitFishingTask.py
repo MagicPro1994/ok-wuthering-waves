@@ -1,3 +1,4 @@
+import re
 import types
 import unittest
 
@@ -1081,3 +1082,57 @@ class TestEquipHover(unittest.TestCase):
         self.assertEqual([('point', 0.5, 0.5), ('point', 0.601, 0.319), ('point', 0.5, 0.5), ('point', 0.601, 0.319)],
                          points)
         self.assertEqual(('up', 'tab'), task.events[-1])
+
+
+class Seller(BaitFishingTask):
+    """Plays the Dock Shop: `counts` are the successive hub cargo counts, `texts` what the shop screen shows."""
+
+    def __init__(self, counts, texts):
+        self.counts = list(counts)
+        self.shown = set(texts)
+        self.keys = []
+        self.clicked_texts = []
+        self.clicked = []
+
+    def info_set(self, *a): pass
+    def log_info(self, *a, **k): pass
+    def sleep(self, *a): pass
+    def screenshot(self, *a, **k): pass
+    def fail(self, message): raise Exception(message)
+    def hub_cargo_used(self): return self.counts.pop(0)
+    def has_text(self, pattern, *box): return any(re.search(pattern, t, re.IGNORECASE) for t in self.shown)
+    def click_at(self, x, y, **k): self.clicked.append((x, y))
+    def send_key(self, key, **k): self.keys.append(key)
+    def wait_until(self, cond, time_out=10, **k): return cond()
+
+    def click_ocr_text(self, pattern, *a, **k):
+        for text in list(self.shown):
+            if text.lower() in pattern.lower().replace('\s*', ' ') or pattern.lower().replace('\s*', ' ') in text.lower():
+                self.clicked_texts.append(text)
+                if text == 'Confirm':
+                    self.shown.discard('Confirm')
+                return True
+        return False
+
+
+class TestSellAll(unittest.TestCase):
+    def test_skips_an_empty_cargo(self):
+        task = Seller([0], [])
+        task.sell_all()
+        self.assertEqual([], task.clicked)
+
+    def test_sells_confirms_and_checks_the_cargo(self):
+        task = Seller([20, 0], ['Sell All', 'Confirm', 'Dock Shop'])
+        task.sell_all()
+        self.assertEqual(['Sell All', 'Confirm'], task.clicked_texts)
+
+    def test_opens_the_catch_list_when_the_shop_has_no_sell_all(self):
+        task = Seller([20, 0], ['Dock Shop'])
+        with self.assertRaises(Exception):
+            task.sell_all()
+        self.assertIn('c', task.keys)
+
+    def test_fails_when_the_cargo_is_not_empty_afterwards(self):
+        task = Seller([20, 7], ['Sell All', 'Dock Shop'])
+        with self.assertRaises(Exception):
+            task.sell_all()

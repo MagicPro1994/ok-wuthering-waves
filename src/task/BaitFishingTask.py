@@ -74,6 +74,45 @@ class BaitFishingTask(FishingTask):
         self.sell_all()
         self.set_sail()
 
+    HUB_CARGO_BOX = (0.80, 0.84, 0.88, 0.89)    # "N/52" above the Dock Shop button of the Dock hub
+
+    def hub_cargo_used(self):
+        for _ in range(3):
+            used = cg.parse_cargo_used(self.texts(*self.HUB_CARGO_BOX))
+            if used is not None:
+                return used
+            self.sleep(0.4)
+        return None
+
+    def sell_all(self):
+        # The inherited flow skips the sale when the Catch List says "No Catch", but the fish loaded into the cargo
+        # are not in the Catch List. Sell whatever the Dock Shop offers and check the cargo is empty afterwards.
+        self.info_set('current task', 'sell all')
+        used = self.hub_cargo_used()
+        self.log_info(f'sell all: cargo {used}/52')
+        if used == 0:
+            return
+        self.click_at(0.835, 0.93, after_sleep=2.0)         # Dock Shop
+        self.screenshot('dock_shop')
+        if not self.has_text(r'Sell\s*All'):
+            self.send_key('c', after_sleep=1.2)             # Catch List
+            self.screenshot('dock_shop_catch_list')
+        if not self.click_ocr_text(r'Sell\s*All'):
+            self.fail('Sell All not found in the Dock Shop')
+        self.sleep(1.2)
+        for _ in range(3):                                  # a dialog may ask to confirm the sale
+            if not self.click_ocr_text(r'Confirm'):
+                break
+            self.sleep(1.5)
+        self.click_at(*self.REWARD_CLOSE_AT, after_sleep=1.5)    # close "Items Obtained"
+        self.send_key('esc', after_sleep=1.2)
+        if not self.wait_until(lambda: self.has_text(HUB_ANCHOR.pattern), time_out=8):
+            self.fail('the Dock hub did not come back after Sell All')
+        left = self.hub_cargo_used()
+        self.log_info(f'sell all: cargo {left}/52 after the sale')
+        if left:
+            self.fail(f'cargo still holds {left} after Sell All')
+
     SET_SAIL_AT = (0.83, 0.93)    # the Set Sail button of the sail screen (the options keep their last choice)
 
     def set_sail(self):
