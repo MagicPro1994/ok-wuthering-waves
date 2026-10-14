@@ -225,7 +225,7 @@ class BaitFishingTask(FishingTask):
             catches = self.survey_catches()
             plan = plan_cargo(cg.free_cells(occupied), catches)
             self.log_info(f'cargo: {len(plan)} of {len(catches)} catches placed')
-        self.log_info('cargo plan: ' + ', '.join(f'slot {c.slot} value {c.value} -> {sorted(p.cells)}' for c, p in plan))
+            self.log_info('cargo plan: ' + ', '.join(f'slot {c.slot} value {c.value} -> {sorted(p.cells)}' for c, p in plan))
             for catch, placement in plan:
                 if not self.place_catch(catch, placement):
                     # Finish with fish still unplaced loses them: stop with the Cargo screen open instead
