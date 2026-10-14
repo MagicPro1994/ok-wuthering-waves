@@ -42,3 +42,12 @@ def sweep_plan(rng=_random):
 
 def sail_press(rng=_random):
     return rng.uniform(1.8, 2.8)
+
+
+def approach_press(rng=_random):
+    return rng.uniform(0.8, 1.5)
+
+
+def cruise_gap(rng=_random):
+    """Seconds of continuous W before a person eases off it for a moment."""
+    return rng.uniform(9.0, 16.0)

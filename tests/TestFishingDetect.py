@@ -109,6 +109,26 @@ class TestLandAvoidance(unittest.TestCase):
         mask = self.mask('mini_sea_day.png')
         self.assertEqual((200, 0), detect.steer_bearing(mask, 200))
 
+    @staticmethod
+    def blocked_between(lo, hi):
+        """Mask with land across the minimap angles lo..hi (degrees, east 0, anticlockwise)."""
+        _, ang = detect._minimap_grid()
+        return ((ang - lo) % 360) <= ((hi - lo) % 360)
+
+    def test_equal_options_keep_the_side_already_taken(self):
+        mask = self.blocked_between(-40, 40)
+        self.assertEqual(-60, detect.steer_bearing(mask, 0, prefer=-1)[1])
+        self.assertEqual(60, detect.steer_bearing(mask, 0, prefer=1)[1])
+
+    def test_stays_on_the_committed_side_when_it_is_only_a_little_longer(self):
+        # left needs 60, right needs 80 plus the switch cost of 30: keep going right would be 80 < 90
+        mask = self.blocked_between(-40, 60)
+        self.assertEqual(80, detect.steer_bearing(mask, 0, prefer=1)[1])
+
+    def test_switches_side_when_the_committed_side_is_much_longer(self):
+        mask = self.blocked_between(-100, 40)
+        self.assertEqual(60, detect.steer_bearing(mask, 0, prefer=-1)[1])
+
     def test_boxed_in_gives_none(self):
         full = np.ones((260, 260), bool)
         self.assertIsNone(detect.steer_bearing(full, 90))

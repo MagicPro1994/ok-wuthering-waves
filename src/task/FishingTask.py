@@ -219,9 +219,14 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
         self.info_set('progress', f'{done}/{total}')
         return total > 0 and done >= total
 
+    CRUISE_RADIUS = 40      # minimap px from the request icon: closer than this the boat takes short presses
+    PROMPT_RADIUS = 60      # the [F] Fish prompt is only looked for once the icon is well inside the minimap
+
     def sail_to_fish(self):
         # The boat sails along the yellow minimap arrow and A/D turn it (about 80 degrees per second, the camera
         # follows). So steer by the arrow against the purple request icon on the minimap, not by the camera.
+        # Far away W stays held and A/D taps steer, so the boat never stops to think; near the icon it takes
+        # short presses so it cannot overshoot the fish spot.
         self.info_set('current task', 'sail to fish')
         full_px = max(detect.heart_px(self.rgb_frame()), 1)
         last_px = full_px
@@ -231,72 +236,107 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
         detours = 0
         clear_moves = 0
         pos = self.read_coords()
-        while True:
-            if self.fish_prompt():
-                return
-            rgb = self.rgb_frame()
-            px = detect.heart_px(rgb)
-            if detect.hearts_from_px(px, full_px) <= 2:
-                self.fail('hearts too low, aborting')
-            if px < last_px * 0.9:
-                self.avoid_damage()
-                last_px = max(px, 1)
-                continue
-            last_px = max(px, 1)
-            heading = detect.arrow_heading(rgb)
-            bearing = detect.minimap_target_bearing(rgb)
-            found = heading is not None and bearing is not None
-            aim = bearing
-            if found:
-                aim = self.clear_bearing(rgb, bearing)
-                if aim is None:
-                    # land on every side: back off and go round instead of pushing in
-                    if detours >= 6:
-                        self.fail('boxed in by land and detours did not free the boat')
-                    self.detour(detours)
-                    detours += 1
+        w_down = False
+        now = time.time()
+        next_check = now + random.uniform(3.0, 4.5)
+        next_ease = now + hi.cruise_gap()
+        try:
+            while True:
+                rgb = self.rgb_frame()
+                px = detect.heart_px(rgb)
+                if detect.hearts_from_px(px, full_px) <= 2:
+                    self.fail('hearts too low, aborting')
+                if px < last_px * 0.9:
+                    w_down = self.release_w(w_down)
+                    self.avoid_damage()
+                    last_px = max(px, 1)
                     continue
-            err = detect.heading_error(heading, aim) if found else 0.0
-            action = next_action(err, found)
-            if action == 'lost':
-                lost_in_row += 1
-                if lost_in_row >= 4:
-                    if reset_done:
-                        self.fail('request icon not found on the minimap after a time reset')
-                    self.set_time_to_night()
-                    reset_done = True
-                    lost_in_row = 0
-                self.sleep(random.uniform(0.4, 0.9))
-                continue
-            lost_in_row = 0
-            if action == 'turn':
-                self.turn_boat(err)
-            else:
-                self.hold_key('w', hi.sail_press())
-                now = self.read_coords()
-                if moved(pos, now):
-                    stuck = 0
-                    clear_moves += 1
-                    if clear_moves >= 6:      # only a long clean run forgives earlier detours
-                        detours = max(0, detours - 1)
+                last_px = max(px, 1)
+                heading = detect.arrow_heading(rgb)
+                bearing = detect.minimap_target_bearing(rgb)
+                radius = detect.minimap_target_radius(rgb)
+                found = heading is not None and bearing is not None
+                if found and radius < self.PROMPT_RADIUS and self.fish_prompt():
+                    return
+                aim = bearing
+                if found:
+                    aim = self.clear_bearing(rgb, bearing, radius)
+                    if aim is None:
+                        # land on every side: back off and go round instead of pushing in
+                        if detours >= 6:
+                            self.fail('boxed in by land and detours did not free the boat')
+                        w_down = self.release_w(w_down)
+                        self.detour(detours)
+                        detours += 1
+                        continue
+                err = detect.heading_error(heading, aim) if found else 0.0
+                action = next_action(err, found)
+                if action == 'lost':
+                    lost_in_row += 1
+                    if lost_in_row >= 4:
+                        if reset_done:
+                            self.fail('request icon not found on the minimap after a time reset')
+                        w_down = self.release_w(w_down)
+                        self.set_time_to_night()
+                        reset_done = True
+                        lost_in_row = 0
+                    self.sleep(random.uniform(0.4, 0.9))
+                    continue
+                lost_in_row = 0
+                if radius < self.CRUISE_RADIUS:
+                    w_down = self.release_w(w_down)
+                    if action == 'turn':
+                        self.turn_boat(err)
+                    else:
+                        self.hold_key('w', hi.approach_press())
+                    self.sleep(random.uniform(0.3, 0.7))
+                    continue
+                # cruise: W stays held, A/D taps steer
+                if not w_down:
+                    self.send_key_down('w')
+                    w_down = True
+                if action == 'turn':
+                    self.turn_boat(err)
+                now = time.time()
+                if now >= next_ease:
+                    self.send_key_up('w')
+                    self.sleep(random.uniform(0.15, 0.5))
+                    self.send_key_down('w')
+                    next_ease = now + hi.cruise_gap()
+                if now >= next_check:
+                    here = self.read_coords()
+                    if moved(pos, here, 12):
+                        stuck = 0
+                        clear_moves += 1
+                        if clear_moves >= 3:      # only a long clean run forgives earlier detours
+                            detours = max(0, detours - 1)
+                            clear_moves = 0
+                    else:
+                        stuck += 1
                         clear_moves = 0
-                else:
-                    stuck += 1
-                    clear_moves = 0
-                pos = now if now is not None else pos
-                if stuck >= 2:
-                    if detours >= 6:
-                        self.fail('boat is stuck and detours did not free it')
-                    self.detour(detours)
-                    detours += 1
-                    stuck = 0
-                    pos = self.read_coords() or pos
-            self.sleep(random.uniform(0.3, 0.8))
+                    pos = here if here is not None else pos
+                    if stuck >= 2:
+                        if detours >= 6:
+                            self.fail('boat is stuck and detours did not free it')
+                        w_down = self.release_w(w_down)
+                        self.detour(detours)
+                        detours += 1
+                        stuck = 0
+                        pos = self.read_coords() or pos
+                    next_check = time.time() + random.uniform(3.0, 4.5)
+                self.sleep(random.uniform(0.25, 0.5))
+        finally:
+            self.release_w(w_down)
 
-    def clear_bearing(self, rgb, bearing):
-        # Aim at the nearest direction to the target whose minimap wedge is open water. Near the target
-        # (icon well inside the rim) the final approach ignores land: the fish spot itself may be by a shore.
-        radius = detect.minimap_target_radius(rgb)
+    def release_w(self, w_down):
+        if w_down:
+            self.send_key_up('w')
+        return False
+
+    def clear_bearing(self, rgb, bearing, radius):
+        # Aim at the cheapest direction near the target whose minimap wedge is open water, sticking to the
+        # side already being rounded. Near the target (icon well inside the rim) the final approach ignores
+        # land: the fish spot itself may be by a shore.
         if radius is not None and radius < 45:
             return bearing
         steered = detect.steer_bearing(detect.minimap_danger(rgb), bearing, self.avoid_side)
@@ -320,9 +360,9 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
         self.hold_key('w', random.uniform(3.0, 4.0) + 1.5 * attempt)
 
     def turn_boat(self, error_deg):
-        # positive error: the target is anticlockwise of the heading, so turn left
+        # positive error: the target is anticlockwise of the heading, so turn left (W, if held, stays held)
         self.send_key('a' if error_deg > 0 else 'd', down_time=hi.turn_hold_seconds(error_deg))
-        self.sleep(hi.short_pause() + 0.3)
+        self.sleep(hi.short_pause() + 0.2)
 
     def avoid_damage(self):
         # Land, ghost or tornado: back off, turn about 90 degrees away, continue.

@@ -129,16 +129,22 @@ def sector_danger(mask: np.ndarray, bearing: float, half_width: float = 15.0) ->
     return float(mask[wedge].mean()) if wedge.any() else 0.0
 
 
-def steer_bearing(mask: np.ndarray, target_bearing: float, prefer: int = 1, limit: float = 0.3):
-    """Nearest clear bearing to the target's, as (bearing, offset), or None when every direction is blocked.
+def steer_bearing(mask: np.ndarray, target_bearing: float, prefer: int = 1, limit: float = 0.3,
+                  switch_cost: float = 30.0):
+    """Cheapest clear bearing near the target's, as (bearing, offset), or None when every direction is blocked.
 
-    `prefer` (+1 / -1) breaks ties toward the side the boat already turned, so it does not flip-flop.
+    The cost is the turn away from the target, plus `switch_cost` for the side the boat is not already going
+    round (`prefer`, +1 / -1). That commitment makes it follow an island's coast instead of dithering at it.
     """
+    options = []
     for offset in range(0, 181, 20):
         for sign in ((1,) if offset == 0 else (prefer, -prefer)):
-            candidate = (target_bearing + sign * offset) % 360
-            if sector_danger(mask, candidate) < limit:
-                return candidate, sign * offset
+            cost = offset + (switch_cost if offset and sign != prefer else 0)
+            options.append((cost, sign * offset))
+    for _, signed in sorted(options, key=lambda option: option[0]):
+        candidate = (target_bearing + signed) % 360
+        if sector_danger(mask, candidate) < limit:
+            return candidate, signed
     return None
 
 

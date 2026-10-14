@@ -37,6 +37,16 @@ class TestHumanInput(unittest.TestCase):
         self.assertLessEqual(hi.turn_hold_seconds(500, self.rng), 2.4 * 1.08)
         self.assertAlmostEqual(0.5, hi.turn_hold_seconds(40.0, random.Random(1)), delta=0.04)
 
+    def test_approach_press_is_shorter_than_a_cruise_press(self):
+        for _ in range(100):
+            press = hi.approach_press(self.rng)
+            self.assertTrue(0.8 <= press <= 1.5, press)
+
+    def test_cruise_gaps_are_random(self):
+        gaps = {round(hi.cruise_gap(self.rng), 3) for _ in range(50)}
+        self.assertGreater(len(gaps), 40)
+        self.assertTrue(all(9 <= g <= 16 for g in gaps))
+
     def test_offset_point_clamped_and_close(self):
         for _ in range(200):
             x, y = hi.offset_point(0.001, 0.999, self.rng)
