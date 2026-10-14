@@ -108,6 +108,8 @@ class BaitFishingTask(FishingTask):
             if not self.wait_until(self.wheel_open, time_out=5):
                 self.fail('utility wheel did not open')
             self.sleep(random.uniform(0.3, 0.6))
+            self.point_cursor(0.5, 0.5)       # the wheel reads the move from its centre, wherever the cursor was parked
+            self.sleep(random.uniform(0.2, 0.4))
             self.point_cursor(*ui.UTILITY_SLOTS[name])
             self.sleep(random.uniform(0.4, 0.8))
         finally:
@@ -125,8 +127,13 @@ class BaitFishingTask(FishingTask):
         return None
 
     def bait_count(self):
-        self.equip('baiting')
-        return self.utility_count()
+        for _ in range(2):
+            self.equip('baiting')
+            count = self.utility_count()
+            if count is not None:
+                return count
+            self.screenshot('utility_missed')   # no count on the bottom-right icon: Baiting was probably not picked
+        return None
 
     # ---- game-facing states (Tasks 6 to 8) -----------------------------
 

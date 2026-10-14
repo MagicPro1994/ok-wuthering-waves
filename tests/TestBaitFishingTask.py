@@ -781,7 +781,7 @@ class TestEquip(unittest.TestCase):
     def test_holds_the_key_points_at_the_slot_and_releases(self):
         task = Equipper([True, False])
         task.equip('baiting')
-        self.assertEqual([('down', 'tab'), ('point', 0.601, 0.319), ('up', 'tab')], task.events)
+        self.assertEqual([('down', 'tab'), ('point', 0.5, 0.5), ('point', 0.601, 0.319), ('up', 'tab')], task.events)
 
     def test_releases_the_key_when_the_wheel_never_opens(self):
         task = Equipper([False])
@@ -933,3 +933,37 @@ class TestRunStart(unittest.TestCase):
 
     def test_elsewhere_travels_to_the_dock_first(self):
         self.assertEqual(['ensure_main', 'go_to_dock', 'prepare_and_sail', 'loop'], self.run_task(False, False))
+
+
+class Counter(BaitFishingTask):
+    def __init__(self, counts):
+        self.counts = list(counts)
+        self.equipped = []
+        self.shots = []
+
+    def equip(self, name):
+        self.equipped.append(name)
+
+    def utility_count(self):
+        return self.counts.pop(0)
+
+    def screenshot(self, name=None, **kwargs):
+        self.shots.append(name)
+
+
+class TestBaitCount(unittest.TestCase):
+    def test_reads_the_count_after_one_equip(self):
+        task = Counter([186])
+        self.assertEqual(186, task.bait_count())
+        self.assertEqual(['baiting'], task.equipped)
+
+    def test_retries_the_equip_once_when_the_count_is_missing(self):
+        task = Counter([None, 186])
+        self.assertEqual(186, task.bait_count())
+        self.assertEqual(['baiting', 'baiting'], task.equipped)
+        self.assertEqual(['utility_missed'], task.shots)
+
+    def test_gives_up_after_two_misses(self):
+        task = Counter([None, None])
+        self.assertIsNone(task.bait_count())
+        self.assertEqual(['utility_missed', 'utility_missed'], task.shots)
