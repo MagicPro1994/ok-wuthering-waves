@@ -37,6 +37,13 @@ def hearts_from_px(px: int, full_px: int = FULL_HEARTS_PX, max_hearts: int = MAX
     return max(0, min(max_hearts, round(px * max_hearts / full_px)))
 
 
+def hearts_state(px: int, full_px: int = FULL_HEARTS_PX) -> str:
+    """'hidden' when almost no heart pixels show (a menu covers the HUD), 'low' at 2 hearts or fewer, else 'ok'."""
+    if px < full_px * 0.02:
+        return 'hidden'
+    return 'low' if hearts_from_px(px, full_px) <= 2 else 'ok'
+
+
 def marker_error_deg(marker_x: float, centre_x: float = 960.0, px_per_deg: float = 21.0) -> float:
     return (marker_x - centre_x) / px_per_deg
 

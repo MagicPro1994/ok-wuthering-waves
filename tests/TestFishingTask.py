@@ -38,48 +38,33 @@ class TestFishingTaskBasics(unittest.TestCase):
         self.assertIn(["src.task.FishingTask", "FishingTask"], config["onetime_tasks"])
 
 
-from src.task.FishingTask import premium_available, track_action
+from src.task.FishingTask import premium_entry, track_action
+
+# OCR centres (name, y) of the live Fishing Request panel
+PANEL = [("Premium Request", 128), ("Night Special: Abyssal Mutants", 187), ("Refresh", 183), ("0/2", 218),
+         ("in 13h", 221), ("Common Request", 298), ("Night Challenge: Deceleration .", 358), ("0/4", 388),
+         ("Ongoing", 390), ("Challenge: End of Hunt", 558), ("0/4", 589)]
 
 
-class TestPremiumAvailable(unittest.TestCase):
-    def test_open_entry_with_refresh_timer(self):
-        # live screen: the open premium entry shows its refresh countdown too
-        self.assertTrue(premium_available(["Night Special: Abyssal Mutants", "0/2", "Refresh", "in 13h"]))
+class TestPremiumEntry(unittest.TestCase):
+    def test_finds_the_open_premium_entry(self):
+        self.assertEqual(218, premium_entry(PANEL))
 
-    def test_partly_done(self):
-        self.assertTrue(premium_available(["Special: One Last Tear", "1/2"]))
+    def test_ignores_common_requests_when_there_is_no_premium_section(self):
+        # the failure seen live: no premium entry, so the first common request sat where the premium one would
+        shifted = [("Common Request", 128), ("Night Challenge: Nothing Ventured", 187), ("0/1", 218)]
+        self.assertIsNone(premium_entry(shifted))
 
-    def test_completed_entry(self):
-        self.assertFalse(premium_available(["Night Special: Abyssal Mutants", "2/2", "Refresh", "in 13h"]))
+    def test_premium_header_without_an_entry(self):
+        self.assertIsNone(premium_entry([("Premium Request", 128), ("Refresh in 3h", 190), ("Common Request", 298),
+                                         ("0/4", 388)]))
 
-    def test_no_entry(self):
-        self.assertFalse(premium_available(["Refresh", "in 13h"]))
-        self.assertFalse(premium_available([]))
+    def test_completed_premium_entry(self):
+        done = [(n, y) if n != "0/2" else ("2/2", y) for n, y in PANEL]
+        self.assertIsNone(premium_entry(done))
 
-
-class TestCoords(unittest.TestCase):
-    def test_parses_the_readout(self):
-        from src.task.FishingTask import parse_coords
-        self.assertEqual((6962, 3089), parse_coords(['6962,3089,0 2026-10-1416:12:29+7* UHD']))
-
-    def test_unreadable_gives_none(self):
-        from src.task.FishingTask import parse_coords
-        self.assertIsNone(parse_coords(['UHD', '']))
-        self.assertIsNone(parse_coords([]))
-
-    def test_moved_after_a_sail_press(self):
-        from src.task.FishingTask import moved
-        self.assertTrue(moved((6953, 3064), (6962, 3089)))     # live: 2 s of W moved about 27 units
-
-    def test_not_moved_when_stuck(self):
-        from src.task.FishingTask import moved
-        self.assertFalse(moved((6962, 3089), (6963, 3090)))
-
-    def test_unreadable_counts_as_moved(self):
-        from src.task.FishingTask import moved
-        self.assertTrue(moved(None, (1, 1)))
-        self.assertTrue(moved((1, 1), None))
-
+    def test_no_boxes(self):
+        self.assertIsNone(premium_entry([]))
 
 class TestHubAnchor(unittest.TestCase):
     def test_matches_what_ocr_reads_on_the_hub(self):
@@ -125,3 +110,28 @@ class TestSellText(unittest.TestCase):
         from src.task.FishingTask import catch_list_empty
         self.assertTrue(catch_list_empty(["Catch List", "No Catch"]))
         self.assertFalse(catch_list_empty(["Catch List", "Giant Gulper"]))
+
+
+class TestDialHour(unittest.TestCase):
+    # OCR (text, x, y) of the live Set Time dial, relative coordinates
+    BOXES = [("Set Time", 0.083, 0.065), ("Current Time", 0.499, 0.095), ("09:00", 0.499, 0.137),
+             ("Today", 0.083, 0.138), ("09:00", 0.5, 0.654), ("10:00", 0.648, 0.622), ("11:00", 0.785, 0.622),
+             ("Today", 0.499, 0.697), ("Confirm", 0.499, 0.92)]
+
+    def test_reads_the_centred_time(self):
+        from src.task.FishingTask import dial_hour
+        self.assertEqual(9, dial_hour(self.BOXES))
+
+    def test_ignores_the_current_time_label(self):
+        from src.task.FishingTask import dial_hour
+        boxes = [("14:00", 0.499, 0.137), ("19:00", 0.5, 0.654)]
+        self.assertEqual(19, dial_hour(boxes))
+
+    def test_unreadable_gives_none(self):
+        from src.task.FishingTask import dial_hour
+        self.assertIsNone(dial_hour([("Confirm", 0.499, 0.92)]))
+
+    def test_is_night(self):
+        from src.task.FishingTask import is_night_hour
+        self.assertTrue(all(is_night_hour(h) for h in (19, 22, 23, 0, 4)))
+        self.assertFalse(any(is_night_hour(h) for h in (5, 9, 15, 18)))

@@ -19,6 +19,24 @@ logger = Logger.get_logger(__name__)
 HUB_ANCHOR = re.compile(r'Fame|Set\s*Sail|Dock\s*Shop', re.IGNORECASE)   # OCR reads "Dock Shop" as "DockShop"
 
 
+def dial_hour(boxes):
+    """Hour on the Set Time dial's centred slot, from OCR (text, x, y) in relative coordinates, or None.
+
+    The centred slot sits at x about 0.5 and y about 0.65; the 'Current Time' value at the top is ignored.
+    """
+    best = None
+    for text, x, y in boxes:
+        match = re.fullmatch(r'\s*(\d{1,2}):(\d{2})\s*', text)
+        if match and y > 0.5 and abs(x - 0.5) < 0.06:
+            if best is None or abs(x - 0.5) < best[0]:
+                best = (abs(x - 0.5), int(match.group(1)))
+    return None if best is None else best[1]
+
+
+def is_night_hour(hour):
+    return hour >= 19 or hour < 5
+
+
 def parse_coords(texts):
     """Player position from the bottom-left readout, e.g. '6962,3089,0 2026-10-14...'."""
     for text in texts:
@@ -41,13 +59,24 @@ def next_action(error_deg, target_found):
     return 'turn' if abs(error_deg) > 12 else 'forward'
 
 
-def premium_available(texts):
-    # An open premium entry shows its progress (0/2) next to the refresh timer; a finished one shows 2/2.
-    for text in texts:
+def premium_entry(boxes):
+    """Vertical centre of the open entry under the 'Premium Request' header, or None.
+
+    `boxes` are OCR (text, y centre) pairs of the Fishing Request list. The entry must lie between the Premium
+    and Common headers: with no premium entry the first common request moves up into its place. An open entry
+    shows progress such as 0/2 next to its refresh timer; a finished one shows 2/2.
+    """
+    heads = [y for text, y in boxes if 'premium' in text.lower()]
+    if not heads:
+        return None
+    top = min(heads)
+    commons = [y for text, y in boxes if 'common' in text.lower() and y > top]
+    bottom = min(commons) if commons else float('inf')
+    for text, y in sorted(boxes, key=lambda box: box[1]):
         match = re.search(r'(\d+)\s*/\s*(\d+)', text)
-        if match and int(match.group(1)) < int(match.group(2)):
-            return True
-    return False
+        if match and top < y < bottom and int(match.group(1)) < int(match.group(2)):
+            return y
+    return None
 
 
 def track_action(texts):
@@ -162,8 +191,8 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
         self.send_key('f', after_sleep=2.0)                       # opens the Dock hub
 
     REQUEST_MORE = (0.2375, 0.296)               # "..." on the tracked request in the dock hub
-    PREMIUM_ROW = (0.03, 0.14, 0.38, 0.24)      # OCR region of the premium entry (name, progress, refresh)
-    PREMIUM_ENTRY = (0.19, 0.19)
+    REQUEST_LIST = (0.0, 0.08, 0.4, 0.8)        # OCR region of the request list on the left
+    PREMIUM_ENTRY_X = 0.19
     TRACK_BUTTON = (0.78, 0.86, 0.98, 0.95)      # OCR region of Track / Cancel Tracking
     TRACK_AT = (0.877, 0.903)
 
@@ -175,9 +204,12 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
         if not self.click_ocr_text('Fishing Request', 0.0, 0.1, 0.5, 0.4):
             self.click_at(*self.REQUEST_MORE)
         self.sleep(1.2)
-        if not premium_available(self.texts(*self.PREMIUM_ROW)):
+        boxes = [(box.name, (box.y + box.height / 2) * 1080 / self.height)
+                 for box in (self.ocr(*self.REQUEST_LIST) or [])]
+        entry_y = premium_entry(boxes)
+        if entry_y is None:
             return False
-        self.click_at(*self.PREMIUM_ENTRY, after_sleep=0.8)
+        self.click_at(self.PREMIUM_ENTRY_X, (entry_y - 12) / 1080, after_sleep=0.8)
         action = track_action(self.texts(*self.TRACK_BUTTON))
         if action is None:
             self.fail('Track button not found on the premium request')
@@ -200,12 +232,22 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
     def set_time_to_night(self):
         self.send_key('esc', after_sleep=1.2)
         self.click_at(0.713, 0.958, after_sleep=2.0)  # clock icon
-        self.real.drag(0.85, 0.5, 0.15, 0.5, random.uniform(0.8, 1.0))
-        self.sleep(0.5)
-        self.real.drag(0.91, 0.5, 0.07, 0.5, random.uniform(0.9, 1.1))
-        self.sleep(0.5)
+        # one drag moves the dial about 5 hours (live: 10:00 -> 15:00); read it after every drag
+        for _ in range(6):
+            hour = dial_hour(self.dial_boxes())
+            if hour is not None and is_night_hour(hour):
+                break
+            self.real.drag(random.uniform(0.84, 0.88), 0.5, random.uniform(0.12, 0.17), 0.5,
+                           random.uniform(0.8, 1.0))
+            self.sleep(random.uniform(0.6, 1.0))
+        else:
+            self.fail('could not set the time to night on the Set Time dial')
         self.click_at(0.5, 0.92, after_sleep=3.0)     # Confirm
         self.send_key('esc', after_sleep=1.0)
+
+    def dial_boxes(self):
+        return [(box.name, (box.x + box.width / 2) / self.width, (box.y + box.height / 2) / self.height)
+                for box in (self.ocr(0.2, 0.5, 0.8, 0.8) or [])]
 
     # ---- sailing -------------------------------------------------------
 
@@ -228,10 +270,12 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
         # Far away W stays held and A/D taps steer, so the boat never stops to think; near the icon it takes
         # short presses so it cannot overshoot the fish spot.
         self.info_set('current task', 'sail to fish')
-        full_px = max(detect.heart_px(self.rgb_frame()), 1)
+        first_px = detect.heart_px(self.rgb_frame())
+        full_px = first_px if first_px >= detect.FULL_HEARTS_PX * 0.5 else detect.FULL_HEARTS_PX
         last_px = full_px
         reset_done = False
         lost_in_row = 0
+        hidden_in_row = 0
         stuck = 0
         detours = 0
         clear_moves = 0
@@ -244,7 +288,17 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
             while True:
                 rgb = self.rgb_frame()
                 px = detect.heart_px(rgb)
-                if detect.hearts_from_px(px, full_px) <= 2:
+                state = detect.hearts_state(px, full_px)
+                if state == 'hidden':
+                    # a menu or dialog covers the HUD: wait for it rather than reading zero hearts
+                    hidden_in_row += 1
+                    if hidden_in_row >= 12:
+                        self.fail('HUD not visible while sailing (a menu is open?)')
+                    w_down = self.release_w(w_down)
+                    self.sleep(random.uniform(0.5, 1.0))
+                    continue
+                hidden_in_row = 0
+                if state == 'low':
                     self.fail('hearts too low, aborting')
                 if px < last_px * 0.9:
                     w_down = self.release_w(w_down)

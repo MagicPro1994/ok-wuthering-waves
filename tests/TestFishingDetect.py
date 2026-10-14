@@ -164,3 +164,17 @@ class TestMinimap(unittest.TestCase):
         self.assertAlmostEqual(44.0, detect.heading_error(310, 354), delta=0.01)
         self.assertAlmostEqual(-84.0, detect.heading_error(78, 354), delta=0.01)
         self.assertAlmostEqual(180.0, abs(detect.heading_error(171, 351)), delta=0.01)
+
+
+class TestHeartsState(unittest.TestCase):
+    def test_full_and_damaged(self):
+        self.assertEqual('ok', detect.hearts_state(5633, 5633))
+        self.assertEqual('ok', detect.hearts_state(3000, 5633))
+
+    def test_low_hearts_abort(self):
+        self.assertEqual('low', detect.hearts_state(1400, 5633))   # 2 hearts
+
+    def test_no_red_at_all_means_the_hud_is_not_showing(self):
+        # live: a menu left open reads as zero hearts and must not look like a sinking boat
+        self.assertEqual('hidden', detect.hearts_state(0, 5633))
+        self.assertEqual('hidden', detect.hearts_state(12, 5633))
