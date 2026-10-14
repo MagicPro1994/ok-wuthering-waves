@@ -875,3 +875,61 @@ class TestReturnToDock(unittest.TestCase):
         task = Docking(["Return to the dock", "Fish"])
         task.return_to_dock()
         self.assertEqual(['Return to the dock'], task.selected)
+
+
+class Starter(BaitFishingTask):
+    class _Keys:
+        def get(self, key):
+            return 't'
+
+    key_config = _Keys()
+
+    def __init__(self, sailing, on_hub):
+        self.sailing, self.on_hub = sailing, on_hub
+        self.calls = []
+
+    hwnd = types.SimpleNamespace(hwnd=1)
+
+    def is_sailing(self):
+        return self.sailing
+
+    def has_text(self, pattern, *region):
+        return self.on_hub
+
+    def ensure_main(self):
+        self.calls.append('ensure_main')
+
+    def go_to_dock(self):
+        self.calls.append('go_to_dock')
+
+    def prepare_and_sail(self):
+        self.calls.append('prepare_and_sail')
+
+    def loop(self):
+        self.calls.append('loop')
+
+    def log_info(self, message, notify=False, **kwargs):
+        pass
+
+
+class TestRunStart(unittest.TestCase):
+    def run_task(self, sailing, on_hub):
+        task = Starter(sailing, on_hub)
+        import src.task.BaitFishingTask as module
+        saved = (module.WWOneTimeTask.run, module.RealInput)
+        module.WWOneTimeTask.run = lambda self: None
+        module.RealInput = lambda hwnd: object()
+        try:
+            task.run()
+        finally:
+            module.WWOneTimeTask.run, module.RealInput = saved
+        return task.calls
+
+    def test_sailing_goes_straight_to_the_loop(self):
+        self.assertEqual(['loop'], self.run_task(True, False))
+
+    def test_on_the_dock_hub_only_sets_sail(self):
+        self.assertEqual(['prepare_and_sail', 'loop'], self.run_task(False, True))
+
+    def test_elsewhere_travels_to_the_dock_first(self):
+        self.assertEqual(['ensure_main', 'go_to_dock', 'prepare_and_sail', 'loop'], self.run_task(False, False))

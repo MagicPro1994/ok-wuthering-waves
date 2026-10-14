@@ -32,8 +32,9 @@ class BaitFishingTask(FishingTask):
         self.check_tool_key()
         self.real = RealInput(self.hwnd.hwnd)
         if not self.is_sailing():
-            self.ensure_main()
-            self.go_to_dock()
+            if not self.has_text(HUB_ANCHOR.pattern):    # already on the Dock hub: no need to travel there
+                self.ensure_main()
+                self.go_to_dock()
             self.prepare_and_sail()
         self.loop()
         self.log_info('Bait fishing done', notify=True)
