@@ -1,6 +1,8 @@
 import random
 import time
 
+import win32api
+
 from ok import Logger
 
 from src.fishing import bait_ui as ui, cargo_grid as cg, detect, human_input as hi
@@ -88,15 +90,26 @@ class BaitFishingTask(FishingTask):
         # the utility counts printed on the wheel only exist while it is open
         return parse_count(self.texts(*ui.WHEEL_BOX)) is not None
 
+    def point_cursor(self, fx, fy):
+        # the wheel picks the slot under the real cursor when the key is released (see CombatCheck's tab wheel)
+        x, y = hi.offset_point(fx, fy)
+        px, py = x * self.width, y * self.height
+        self.move(px, py)
+        win32api.SetCursorPos(self.executor.interaction.capture.get_abs_cords(px, py))
+
     def equip(self, name):
+        # Tab is a hold-to-open wheel: hold it, point at the utility, release to select
         wheel_key = self.key_config.get('Wheel Key')
-        self.send_key(wheel_key, after_sleep=random.uniform(0.7, 1.1))
-        if not self.wait_until(self.wheel_open, time_out=5):
-            self.fail('utility wheel did not open')
-        self.click_at(*ui.UTILITY_SLOTS[name], after_sleep=random.uniform(0.6, 1.0))
-        if self.wait_until(lambda: not self.wheel_open(), time_out=3):
-            return
-        self.send_key(wheel_key, after_sleep=random.uniform(0.6, 1.0))   # the pick left the wheel open
+        self.send_key_down(wheel_key)
+        try:
+            if not self.wait_until(self.wheel_open, time_out=5):
+                self.fail('utility wheel did not open')
+            self.sleep(random.uniform(0.3, 0.6))
+            self.point_cursor(*ui.UTILITY_SLOTS[name])
+            self.sleep(random.uniform(0.4, 0.8))
+        finally:
+            self.send_key_up(wheel_key)
+        self.sleep(random.uniform(0.4, 0.7))
         if not self.wait_until(lambda: not self.wheel_open(), time_out=4):
             self.fail('utility wheel did not close after picking ' + name)
 

@@ -352,24 +352,30 @@ class TestSetSail(unittest.TestCase):
 class Equipper(BaitFishingTask):
     """Plays the utility wheel: `wheel` is the open/closed state sequence seen by wheel_open."""
 
-    def __init__(self, wheel):
-        self.wheel = list(wheel)
-        self.events = []
-
     class _Keys:
         def get(self, key):
             return 'tab'
 
     key_config = _Keys()
 
+    def __init__(self, wheel):
+        self.wheel = list(wheel)
+        self.events = []
+
     def wheel_open(self):
         return self.wheel.pop(0) if len(self.wheel) > 1 else self.wheel[0]
 
-    def send_key(self, key, after_sleep=0):
-        self.events.append(('key', key))
+    def send_key_down(self, key, after_sleep=0):
+        self.events.append(('down', key))
 
-    def click_at(self, fx, fy, after_sleep=0.4):
-        self.events.append(('click', round(fx, 3), round(fy, 3)))
+    def send_key_up(self, key, after_sleep=0):
+        self.events.append(('up', key))
+
+    def point_cursor(self, fx, fy):
+        self.events.append(('point', round(fx, 3), round(fy, 3)))
+
+    def sleep(self, seconds):
+        pass
 
     def wait_until(self, condition, time_out=10):
         return condition()
@@ -379,22 +385,19 @@ class Equipper(BaitFishingTask):
 
 
 class TestEquip(unittest.TestCase):
-    def test_picks_the_slot_and_leaves_when_the_wheel_closes(self):
+    def test_holds_the_key_points_at_the_slot_and_releases(self):
         task = Equipper([True, False])
         task.equip('baiting')
-        self.assertEqual([('key', 'tab'), ('click', 0.601, 0.319)], task.events)
+        self.assertEqual([('down', 'tab'), ('point', 0.601, 0.319), ('up', 'tab')], task.events)
 
-    def test_closes_the_wheel_with_the_key_when_the_pick_left_it_open(self):
-        task = Equipper([True, True, False])
-        task.equip('sweet_puff')
-        self.assertEqual([('key', 'tab'), ('click', 0.501, 0.243), ('key', 'tab')], task.events)
-
-    def test_fails_when_the_wheel_never_opens(self):
+    def test_releases_the_key_when_the_wheel_never_opens(self):
+        task = Equipper([False])
         with self.assertRaises(Exception) as ctx:
-            Equipper([False]).equip('baiting')
+            task.equip('baiting')
         self.assertIn('did not open', str(ctx.exception))
+        self.assertEqual([('down', 'tab'), ('up', 'tab')], task.events)
 
     def test_fails_when_the_wheel_never_closes(self):
         with self.assertRaises(Exception) as ctx:
-            Equipper([True]).equip('baiting')
+            Equipper([True]).equip('sweet_puff')
         self.assertIn('did not close', str(ctx.exception))
