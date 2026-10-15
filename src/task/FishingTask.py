@@ -9,6 +9,7 @@ from ok import Logger
 
 from src.fishing import detect, human_input as hi
 from src.fishing.cargo_packer import pack
+from src.fishing.nav import Navigator
 from src.fishing.real_input import RealInput
 from src.task.BaseWWTask import BaseWWTask
 from src.task.WWOneTimeTask import WWOneTimeTask
@@ -44,13 +45,6 @@ def parse_coords(texts):
         if match:
             return int(match.group(1)), int(match.group(2))
     return None
-
-
-def moved(before, after, min_units=8):
-    # live: a 2 s W press moves about 27 units; an unreadable position never counts as stuck
-    if before is None or after is None:
-        return True
-    return math.hypot(after[0] - before[0], after[1] - before[1]) >= min_units
 
 
 def next_action(error_deg, target_found):
@@ -108,6 +102,7 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
         self.default_config.update({'Max Sail Minutes': 25})
         self.real = None
         self.avoid_side = random.choice([-1, 1])
+        self.nav = Navigator()      # walls the minimap does not show, remembered for the whole run
 
     def run(self):
         WWOneTimeTask.run(self)
@@ -301,13 +296,12 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
         reset_done = False
         lost_in_row = 0
         hidden_in_row = 0
-        stuck = 0
         detours = 0
-        clear_moves = 0
-        pos = self.read_coords()
+        bumps = 0
         w_down = False
+        self.nav.reset_motion()
         now = time.time()
-        next_check = now + random.uniform(3.0, 4.5)
+        next_check = now
         next_ease = now + hi.cruise_gap()
         try:
             while True:
@@ -327,6 +321,7 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
                     self.fail('hearts too low, aborting')
                 if px < last_px * 0.9:
                     w_down = self.release_w(w_down)
+                    self.nav.mark_hit(self.read_coords(), detect.arrow_heading(rgb))
                     self.avoid_damage()
                     last_px = max(px, 1)
                     continue
@@ -339,7 +334,10 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
                     return
                 aim = bearing
                 if found:
-                    aim = self.clear_bearing(rgb, bearing, radius)
+                    if radius >= 45:
+                        aim = self.nav.aim(bearing)      # walls bumped into earlier
+                    if aim is not None:
+                        aim = self.clear_bearing(rgb, aim, radius)   # land on the minimap
                     if aim is None:
                         # land on every side: back off and go round instead of pushing in
                         if detours >= 6:
@@ -372,6 +370,7 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
                     continue
                 # cruise: W stays held, A/D taps steer
                 if not w_down:
+                    self.nav.reset_motion()
                     self.send_key_down('w')
                     w_down = True
                 if action == 'turn':
@@ -383,26 +382,21 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
                     self.send_key_down('w')
                     next_ease = now + hi.cruise_gap()
                 if now >= next_check:
+                    # a boat that stops moving with W held has hit something the minimap does not show
                     here = self.read_coords()
-                    if moved(pos, here, 12):
-                        stuck = 0
-                        clear_moves += 1
-                        if clear_moves >= 3:      # only a long clean run forgives earlier detours
-                            detours = max(0, detours - 1)
-                            clear_moves = 0
-                    else:
-                        stuck += 1
-                        clear_moves = 0
-                    pos = here if here is not None else pos
-                    if stuck >= 2:
-                        if detours >= 6:
-                            self.fail('boat is stuck and detours did not free it')
+                    h_now = detect.arrow_heading(self.rgb_frame())
+                    hit = self.nav.update(here, h_now, True)
+                    logger.info(f'nav pos={here} heading={h_now} target={bearing:.0f} aim={aim:.0f} '
+                                f'radius={radius:.0f} map={self.nav.mapping()} walls={bumps}')
+                    if hit:
+                        bumps += 1
+                        if bumps > 40:
+                            self.fail('boat keeps hitting obstacles and walls did not free it')
+                        self.info_set('current task', f'bumped {bumps}')
                         w_down = self.release_w(w_down)
-                        self.detour(detours)
-                        detours += 1
-                        stuck = 0
-                        pos = self.read_coords() or pos
-                    next_check = time.time() + random.uniform(3.0, 4.5)
+                        self.hold_key('s', random.uniform(0.8, 1.4))
+                        self.nav.reset_motion()
+                    next_check = time.time() + random.uniform(1.1, 1.6)
                 self.sleep(random.uniform(0.25, 0.5))
         finally:
             self.release_w(w_down)
