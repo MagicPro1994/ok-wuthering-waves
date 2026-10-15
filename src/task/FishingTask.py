@@ -413,18 +413,18 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
         return False
 
     def clear_bearing(self, rgb, bearing, radius):
-        # Aim at the cheapest direction near the target whose minimap wedge is open water, sticking to the
-        # side already being rounded. Near the target (icon well inside the rim) the final approach ignores
-        # land: the fish spot itself may be by a shore.
+        # Plan a route over the whole minimap disc and steer along it, so land is rounded from far off and a bay
+        # closed on its far side is never entered. Near the target (icon well inside the rim) the final approach
+        # ignores land: the fish spot itself may be by a shore. None means every way out is blocked.
         if radius is not None and radius < 45:
             return bearing
-        steered = detect.steer_bearing(detect.minimap_danger(rgb), bearing, self.avoid_side)
-        if steered is None:
+        route = detect.plan_route(detect.minimap_danger(rgb), bearing, radius, self.avoid_side)
+        if route.blocked:
             return None
-        aim, offset = steered
-        if offset:
-            self.avoid_side = 1 if offset > 0 else -1
-        return aim
+        turned = detect.heading_error(bearing, route.bearing)
+        if abs(turned) > 10:
+            self.avoid_side = 1 if turned > 0 else -1     # keep going round the same side next time
+        return route.bearing
 
     def read_coords(self):
         return parse_coords(self.texts(0.0, 0.95, 0.3, 1.0))

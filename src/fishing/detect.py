@@ -1,4 +1,6 @@
+import heapq
 import re
+from collections import namedtuple
 from typing import Iterable, Optional, Tuple
 
 import cv2
@@ -126,7 +128,7 @@ def minimap_danger(rgb: np.ndarray) -> np.ndarray:
     cone = ref * 0.825 + 255 * 0.175
     water = (np.abs(a - ref).max(2) <= 14) | (np.abs(a - cone).max(2) <= 16)
     bad = ~water & ~over & (rad < 74)
-    return cv2.morphologyEx(bad.astype(np.uint8), cv2.MORPH_OPEN, np.ones((5, 5), np.uint8)) > 0
+    return cv2.morphologyEx(bad.astype(np.uint8), cv2.MORPH_OPEN, np.ones((9, 9), np.uint8)) > 0
 
 
 def sector_danger(mask: np.ndarray, bearing: float, half_width: float = 15.0) -> float:
@@ -136,23 +138,97 @@ def sector_danger(mask: np.ndarray, bearing: float, half_width: float = 15.0) ->
     return float(mask[wedge].mean()) if wedge.any() else 0.0
 
 
-def steer_bearing(mask: np.ndarray, target_bearing: float, prefer: int = 1, limit: float = 0.3,
-                  switch_cost: float = 30.0):
-    """Cheapest clear bearing near the target's, as (bearing, offset), or None when every direction is blocked.
+Route = namedtuple('Route', 'bearing blocked path')
 
-    The cost is the turn away from the target, plus `switch_cost` for the side the boat is not already going
-    round (`prefer`, +1 / -1). That commitment makes it follow an island's coast instead of dithering at it.
+_STEPS = [(1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0),
+          (1, 1, 1.414), (1, -1, 1.414), (-1, 1, 1.414), (-1, -1, 1.414)]
+
+
+def plan_route(mask: np.ndarray, bearing: float, radius: Optional[float], prefer: int = 1, reach: float = 72.0,
+               margin: int = 10, cell: int = 4, lookahead: float = 36.0) -> Route:
+    """Route over the whole minimap disc to the request icon, as the bearing to steer, a blocked flag and the path.
+
+    Land is grown by `margin` px so the boat keeps clear of it, then the cheapest path from the boat is searched
+    on a coarse grid. Where the icon lies beyond the disc (`radius` None or past `reach`) the goal is the edge of
+    what is visible: a bay that is closed on the far side is never a goal, only a cell on the rim is, so the boat
+    goes round it instead of into it. `prefer` (+1 anticlockwise, -1 clockwise) breaks ties towards the side
+    already being rounded. `path` is a list of minimap (x, y) pixels.
     """
-    options = []
-    for offset in range(0, 181, 20):
-        for sign in ((1,) if offset == 0 else (prefer, -prefer)):
-            cost = offset + (switch_cost if offset and sign != prefer else 0)
-            options.append((cost, sign * offset))
-    for _, signed in sorted(options, key=lambda option: option[0]):
-        candidate = (target_bearing + signed) % 360
-        if sector_danger(mask, candidate) < limit:
-            return candidate, signed
-    return None
+    cx, cy = MINIMAP_CENTRE
+    grown = cv2.dilate(mask.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * margin + 1,) * 2))
+    size = 260 // cell
+    centre = (int(cx // cell), int(cy // cell))
+    ys, xs = np.mgrid[0:size, 0:size]
+    px, py = xs * cell + cell / 2, ys * cell + cell / 2
+    dist = np.hypot(px - cx, py - cy)
+    free = (grown[(py).astype(int), (px).astype(int)] == 0) & (dist <= reach)
+    free[dist <= margin] = True                      # the boat's own surroundings are never an obstacle
+    tx, ty = np.cos(np.radians(bearing)), np.sin(np.radians(bearing))
+    inside = radius is not None and radius <= reach
+    goal = (cx + tx * radius, cy - ty * radius) if inside else (cx + tx * 1000.0, cy - ty * 1000.0)
+    away = np.hypot(px - goal[0], py - goal[1])      # straight-line distance of every cell to the icon
+    side = tx * (cy - py) - ty * (px - cx)           # >0: anticlockwise of the bearing
+
+    best = np.full((size, size), np.inf)
+    parent = {}
+    best[centre[1], centre[0]] = 0.0
+    queue = [(0.0, centre)]
+    while queue:
+        cost, (x, y) = heapq.heappop(queue)
+        if cost > best[y, x]:
+            continue
+        for dx, dy, length in _STEPS:
+            nx, ny = x + dx, y + dy
+            if not (0 <= nx < size and 0 <= ny < size) or not free[ny, nx]:
+                continue
+            if dx and dy and not (free[y, nx] and free[ny, x]):
+                continue                             # no squeezing diagonally between two bits of land
+            wrong_side = side[ny, nx] * prefer < 0
+            step = length * cell * (1.12 if wrong_side else 1.0)
+            if cost + step < best[ny, nx]:
+                best[ny, nx] = cost + step
+                parent[(nx, ny)] = (x, y)
+                heapq.heappush(queue, (cost + step, (nx, ny)))
+
+    reached = np.isfinite(best)
+    rim = reached & (dist >= reach - 1.5 * cell)
+    target_cell = None
+    if inside:
+        tcx, tcy = int(goal[0] // cell), int(goal[1] // cell)
+        if 0 <= tcx < size and 0 <= tcy < size and reached[tcy, tcx]:
+            target_cell = (tcx, tcy)
+    if target_cell is not None:
+        end = target_cell
+    else:
+        pool = rim if rim.any() else reached
+        # detour = what the path costs beyond open water; the grid's own diagonal rounding must not pick the goal
+        gx, gy = np.abs(xs - centre[0]), np.abs(ys - centre[1])
+        detour = best - cell * (np.maximum(gx, gy) + 0.414 * np.minimum(gx, gy))
+        score = np.where(pool, detour + dist + away, np.inf)
+        end = divmod(int(np.argmin(score)), size)[::-1]
+    path, node = [], end
+    while node != centre:
+        path.append((node[0] * cell + cell / 2, node[1] * cell + cell / 2))
+        node = parent[node]
+    path.append((cx, cy))
+    path.reverse()
+    blocked = not rim.any() and np.hypot(path[-1][0] - cx, path[-1][1] - cy) < 15
+
+    def clear(a, b):
+        steps = int(np.hypot(b[0] - a[0], b[1] - a[1]) / 2) + 1
+        for i in range(steps + 1):
+            x = a[0] + (b[0] - a[0]) * i / steps
+            y = a[1] + (b[1] - a[1]) * i / steps
+            if not free[int(y // cell), int(x // cell)]:
+                return False
+        return True
+
+    # string-pulling: aim at the farthest point of the path that is in a clear straight line from the boat
+    waypoint = path[1] if len(path) > 1 else path[0]
+    for point in path[1:]:
+        if clear((cx, cy), point):
+            waypoint = point
+    return Route(_angle(waypoint[0] - cx, waypoint[1] - cy), blocked, path)
 
 
 def heading_error(heading: float, bearing: float) -> float:

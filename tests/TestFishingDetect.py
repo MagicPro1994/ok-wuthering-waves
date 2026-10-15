@@ -99,40 +99,6 @@ class TestLandAvoidance(unittest.TestCase):
         self.assertGreater(detect.sector_danger(mask, 45), 0.4)
         self.assertLess(detect.sector_danger(mask, 200), 0.1)
 
-    def test_steers_around_land(self):
-        mask = self.mask('mini_dock.png')
-        bearing, offset = detect.steer_bearing(mask, 45)
-        self.assertGreaterEqual(abs(offset), 30)
-        self.assertLess(detect.sector_danger(mask, bearing), 0.3)
-
-    def test_keeps_the_target_bearing_when_clear(self):
-        mask = self.mask('mini_sea_day.png')
-        self.assertEqual((200, 0), detect.steer_bearing(mask, 200))
-
-    @staticmethod
-    def blocked_between(lo, hi):
-        """Mask with land across the minimap angles lo..hi (degrees, east 0, anticlockwise)."""
-        _, ang = detect._minimap_grid()
-        return ((ang - lo) % 360) <= ((hi - lo) % 360)
-
-    def test_equal_options_keep_the_side_already_taken(self):
-        mask = self.blocked_between(-40, 40)
-        self.assertEqual(-60, detect.steer_bearing(mask, 0, prefer=-1)[1])
-        self.assertEqual(60, detect.steer_bearing(mask, 0, prefer=1)[1])
-
-    def test_stays_on_the_committed_side_when_it_is_only_a_little_longer(self):
-        # left needs 60, right needs 80 plus the switch cost of 30: keep going right would be 80 < 90
-        mask = self.blocked_between(-40, 60)
-        self.assertEqual(80, detect.steer_bearing(mask, 0, prefer=1)[1])
-
-    def test_switches_side_when_the_committed_side_is_much_longer(self):
-        mask = self.blocked_between(-100, 40)
-        self.assertEqual(60, detect.steer_bearing(mask, 0, prefer=-1)[1])
-
-    def test_boxed_in_gives_none(self):
-        full = np.ones((260, 260), bool)
-        self.assertIsNone(detect.steer_bearing(full, 90))
-
 
 class TestMinimap(unittest.TestCase):
     def test_arrow_points_west(self):
