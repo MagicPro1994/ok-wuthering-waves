@@ -135,3 +135,18 @@ class TestDialHour(unittest.TestCase):
         from src.task.FishingTask import is_night_hour
         self.assertTrue(all(is_night_hour(h) for h in (19, 22, 23, 0, 4)))
         self.assertFalse(any(is_night_hour(h) for h in (5, 9, 15, 18)))
+
+
+class TestTrackedAfterClick(unittest.TestCase):
+    def test_game_returns_to_the_hub_with_a_toast(self):
+        # live: clicking Track closes the request screen and shows this toast over the dock hub
+        from src.task.FishingTask import tracked_after_click
+        self.assertTrue(tracked_after_click(["Dock", "Fame", "Tracking the target. Please follow the guide.", "Set Sail!"]))
+
+    def test_cancel_tracking_button_still_counts(self):
+        from src.task.FishingTask import tracked_after_click
+        self.assertTrue(tracked_after_click(["Cancel Tracking"]))
+
+    def test_the_request_screen_with_a_track_button_does_not(self):
+        from src.task.FishingTask import tracked_after_click
+        self.assertFalse(tracked_after_click(["Track", "Request Rewards"]))

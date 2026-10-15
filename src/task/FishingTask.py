@@ -88,6 +88,13 @@ def track_action(texts):
     return None
 
 
+def tracked_after_click(texts):
+    """True once a click on Track took: the game shows a toast and drops back to the dock hub, or the
+    request screen now offers Cancel Tracking."""
+    joined = ' '.join(texts).lower()
+    return 'cancel tracking' in joined or 'tracking the target' in joined
+
+
 def catch_list_empty(texts):
     return any('no catch' in t.lower() for t in texts)
 
@@ -226,10 +233,17 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
             self.fail('Track button not found on the premium request')
         if action == 'track':
             self.click_at(*self.TRACK_AT, after_sleep=1.0)
-            if track_action(self.texts(*self.TRACK_BUTTON)) != 'tracking':
+            # live: the game answers with a toast and closes the request screen by itself
+            # (the toast is brief, so the hub being back on screen counts as well)
+            if not self.wait_until(lambda: self.tracked_now(), time_out=6, settle_time=0.3):
                 self.fail('premium request did not become tracked')
-        self.send_key('esc', after_sleep=1.2)     # back to the dock hub
+        if track_action(self.texts(*self.TRACK_BUTTON)) == 'tracking':
+            self.send_key('esc', after_sleep=1.2)     # still on the request screen: back to the dock hub
         return True
+
+    def tracked_now(self):
+        texts = self.texts()
+        return tracked_after_click(texts) or any(HUB_ANCHOR.search(t) for t in texts)
 
     def prepare_and_sail(self):
         self.click_ocr_text('Set Sail')
