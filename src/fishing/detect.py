@@ -81,14 +81,30 @@ def arrow_heading(rgb: np.ndarray) -> Optional[float]:
     return _angle(tip[0], -tip[1])
 
 
+ICON_MIN_PX = 8      # the icon shrinks inside 50 m; the full size is about 250 px
+
+
 def _target_icon(rgb: np.ndarray) -> Optional[Tuple[float, float]]:
+    """Centre of the purple request icon on the minimap, relative to the arrow, or None when it is not shown.
+
+    The minimap is translucent, so the icon's purple shifts with the scenery under it: it is picked by hue, not
+    by a fixed RGB window. The biggest blob is taken, so purple coral at the rim does not pull the centre aside.
+    """
     cx, cy = MINIMAP_CENTRE
-    r, g, b = [rgb[:260, :260, i].astype(int) for i in range(3)]
+    hsv = cv2.cvtColor(np.ascontiguousarray(rgb[:260, :260]), cv2.COLOR_RGB2HSV)
+    h, s, v = [hsv[..., i].astype(int) for i in range(3)]
     yy, xx = np.mgrid[0:260, 0:260]
-    mask = (r > 120) & (r < 200) & (b > 150) & (g < 110) & (b - g > 60) & (np.hypot(xx - cx, yy - cy) < 100)
-    ys, xs = np.nonzero(mask)
-    if len(xs) < 20:
+    mask = ((h >= 122) & (h <= 150) & (s >= 60) & (v >= 110) & (np.hypot(xx - cx, yy - cy) < 92)).astype(np.uint8)
+    if mask.sum() < ICON_MIN_PX:
         return None
+    # the white fish inside the icon splits it: join the pieces before picking the biggest blob
+    count, labels, _, _ = cv2.connectedComponentsWithStats(cv2.dilate(mask, np.ones((5, 5), np.uint8)))
+    sizes = np.bincount(labels[mask > 0], minlength=count)
+    sizes[0] = 0
+    best = int(np.argmax(sizes))
+    if sizes[best] < ICON_MIN_PX:
+        return None
+    ys, xs = np.nonzero((labels == best) & (mask > 0))
     return xs.mean() - cx, ys.mean() - cy
 
 
@@ -110,25 +126,90 @@ def _minimap_grid():
     return np.hypot(xx - cx, yy - cy), np.degrees(np.arctan2(-(yy - cy), xx - cx)) % 360
 
 
+WATER_RGB = np.array([16.0, 46.0, 60.0])    # open water on the minimap is this colour in every scene (spread about 3)
+# The view cone blends the minimap towards white, most near the arrow and fading out to the rim. Open water under
+# it follows this share (measured over many frames at these minimap radii), so the cone is not mistaken for land.
+CONE_RADII = np.array([0.0, 22.0, 30.0, 38.0, 46.0, 54.0, 62.0, 80.0])
+CONE_BLEND = np.array([0.24, 0.236, 0.22, 0.196, 0.17, 0.138, 0.092, 0.05])
+CONE_HALF = 32.0                            # half the angle the cone spans
+LAND_STEP = 16.0                            # colour distance from open water that counts as not water
+CONE_LAND_STEP = 26.0                       # the same under the cone, where the blend itself varies a little
+
+
+def _cone_water(rad: np.ndarray, water: np.ndarray) -> np.ndarray:
+    blend = np.interp(rad, CONE_RADII, CONE_BLEND)[..., None]
+    return water * (1 - blend) + 255.0 * blend
+
+
+def _edge_samples(delta: float):
+    angles = np.radians(np.arange(360))[:, None] + np.radians(delta) + 0 * CONE_EDGE_RADII[None, :]
+    cx, cy = MINIMAP_CENTRE
+    xs = cx + CONE_EDGE_RADII[None, :] * np.cos(angles)
+    ys = cy - CONE_EDGE_RADII[None, :] * np.sin(angles)
+    return xs.astype(np.float32), ys.astype(np.float32)
+
+
+CONE_EDGE_RADII = np.arange(26, 63, 3.0)
+_EDGE_CCW = _edge_samples(3.0)
+_EDGE_CW = _edge_samples(-3.0)
+CONE_EDGE_MIN = 45.0
+
+
+def find_cone(rgb: np.ndarray) -> Optional[float]:
+    """Minimap angle the view cone points to, or None when its edges do not show.
+
+    The cone is a bright wedge with straight edges through the arrow, and the step in brightness across each edge
+    is the same whatever lies beneath (water or land), unlike a land coast, which never lines up on the arrow.
+    """
+    green = cv2.GaussianBlur(rgb[:260, :260, 1].astype(np.float32), (3, 3), 0)
+    ccw = cv2.remap(green, _EDGE_CCW[0], _EDGE_CCW[1], cv2.INTER_LINEAR)
+    cw = cv2.remap(green, _EDGE_CW[0], _EDGE_CW[1], cv2.INTER_LINEAR)
+    step = np.median(ccw - cw, axis=1)          # brighter on the CCW side of the angle: the cone starts there
+    centres = np.arange(360)
+    score = step[np.round(centres - CONE_HALF).astype(int) % 360] - step[np.round(centres + CONE_HALF).astype(int) % 360]
+    best = int(np.argmax(score))
+    return float(best) if score[best] >= CONE_EDGE_MIN else None
+
+
+class _ConeMemory:
+    angle: Optional[float] = None       # where the cone pointed last time it could be seen; the camera turns slowly
+
+
 def minimap_danger(rgb: np.ndarray) -> np.ndarray:
     """Pixels of the minimap that are not open water (land, shallows, structures), as a 260x260 mask.
 
-    The minimap is translucent, so the water colour is taken from the frame itself: the median of the ring around
-    the boat. The view cone is that colour blended 17.5% towards white; anything matching neither is not water.
+    Open water is one flat colour, and under the view cone another that is known too, so land is whatever differs
+    from them: the cone is told apart by its wedge (found from the picture), and the soft band along its two
+    edges is left out rather than guessed.
     """
-    a = rgb[:260, :260].astype(int)
-    rad, _ = _minimap_grid()
+    a = rgb[:260, :260].astype(float)
+    rad, ang = _minimap_grid()
     r, g, b = a[..., 0], a[..., 1], a[..., 2]
     yellow = (r > 180) & (g > 130) & (b < 140)
     purple = (r > 100) & (b > 130) & (g < 120) & (b - g > 40)
     white = (r > 190) & (g > 190) & (b > 190)
     over = cv2.dilate((yellow | purple | white).astype(np.uint8), np.ones((9, 9), np.uint8)) > 0
-    ring = (rad > 30) & (rad < 70) & ~over
-    ref = np.median(a[ring], axis=0) if ring.any() else a.reshape(-1, 3).mean(0)
-    cone = ref * 0.825 + 255 * 0.175
-    water = (np.abs(a - ref).max(2) <= 14) | (np.abs(a - cone).max(2) <= 16)
-    bad = ~water & ~over & (rad < 74)
-    return cv2.morphologyEx(bad.astype(np.uint8), cv2.MORPH_OPEN, np.ones((9, 9), np.uint8)) > 0
+    ring = (rad > 12) & (rad < 68) & ~over
+    near = ring & (np.abs(a - WATER_RGB).sum(2) < 14)
+    water = np.median(a[near], axis=0) if near.sum() > 150 else WATER_RGB
+    plain_gap = np.abs(a - water).sum(2)
+    cone_gap = np.abs(a - _cone_water(rad, water)).sum(2)
+    centre = find_cone(rgb)
+    if centre is None:
+        centre = _ConeMemory.angle      # land under the whole cone hides it: it points where it did
+    else:
+        _ConeMemory.angle = centre
+    if centre is None:
+        bad = plain_gap > LAND_STEP
+        in_band = np.zeros_like(bad)
+    else:
+        off = np.abs((ang - centre + 180) % 360 - 180)
+        inside = off <= CONE_HALF - 4
+        in_band = (off > CONE_HALF - 4) & (off < CONE_HALF + 4)
+        bad = np.where(inside, cone_gap > CONE_LAND_STEP, plain_gap > LAND_STEP)
+    bad = bad & ~in_band & ~over & (rad < 68)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    return cv2.morphologyEx(bad.astype(np.uint8), cv2.MORPH_OPEN, kernel) > 0
 
 
 def sector_danger(mask: np.ndarray, bearing: float, half_width: float = 15.0) -> float:
@@ -236,10 +317,11 @@ def heading_error(heading: float, bearing: float) -> float:
     return (bearing - heading + 180) % 360 - 180
 
 
+def progress_pairs(texts: Iterable[str]) -> list:
+    """Every '(n/m)' objective counter in the texts, as (n, m) pairs."""
+    return [(int(n), int(m)) for text in texts for n, m in _PROGRESS.findall(text)]
+
+
 def parse_progress(texts: Iterable[str]) -> Tuple[int, int]:
-    done = total = 0
-    for text in texts:
-        for n, m in _PROGRESS.findall(text):
-            done += int(n)
-            total += int(m)
-    return done, total
+    pairs = progress_pairs(texts)
+    return sum(n for n, _ in pairs), sum(m for _, m in pairs)

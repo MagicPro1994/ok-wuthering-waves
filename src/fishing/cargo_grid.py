@@ -1,6 +1,7 @@
 import re
 from typing import FrozenSet, Iterable, Optional, Set, Tuple
 
+import cv2
 import numpy as np
 
 Cell = Tuple[int, int]
@@ -146,3 +147,20 @@ def parse_cargo_used(texts: Iterable[str]) -> Optional[int]:
         if match:
             return int(match.group(1))
     return None
+
+
+BADGE_OFFSET = (-89.0, -78.0)    # centre of a card's purple request badge from the card's centre, 1920x1080 pixels
+BADGE_RADIUS = 14
+BADGE_MIN_PX = 60
+
+
+def request_badge(rgb: np.ndarray, slot: int) -> bool:
+    """True when the card in `slot` carries the purple badge of the tracked request (the fish is one it asks for)."""
+    cx, cy = card_center(slot)
+    x, y = int(cx * 1920 + BADGE_OFFSET[0]), int(cy * 1080 + BADGE_OFFSET[1])
+    patch = np.ascontiguousarray(rgb[max(0, y - BADGE_RADIUS):y + BADGE_RADIUS, max(0, x - BADGE_RADIUS):x + BADGE_RADIUS])
+    if patch.size == 0:
+        return False
+    hsv = cv2.cvtColor(patch, cv2.COLOR_RGB2HSV)
+    h, sat, v = hsv[..., 0].astype(int), hsv[..., 1].astype(int), hsv[..., 2].astype(int)
+    return int(((h >= 125) & (h <= 155) & (sat >= 70) & (v >= 110)).sum()) >= BADGE_MIN_PX

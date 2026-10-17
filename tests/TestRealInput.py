@@ -63,3 +63,13 @@ class TestRealInput(unittest.TestCase):
         api = FakeApi()
         RealInput(7, api=api, sleep=lambda s: None).rel_move(40, -1)
         self.assertEqual([("event", MOVE, 40, -1)], api.calls)
+
+
+class TestClick(unittest.TestCase):
+    def test_click_presses_and_releases_at_the_point(self):
+        api = FakeApi()
+        RealInput(7, api=api, sleep=lambda s: None, rng=random.Random(3)).click(0.5, 0.5)
+        events = [c for c in api.calls if c[0] == "event"]
+        self.assertEqual([LEFTDOWN, LEFTUP], [e[1] for e in events])
+        cursors = [c for c in api.calls if c[0] == "cursor"]
+        self.assertEqual((100 + 960, 50 + 540), tuple(cursors[-1][1:]))

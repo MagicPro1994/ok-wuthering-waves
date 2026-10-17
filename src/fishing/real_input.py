@@ -89,3 +89,14 @@ class RealInput:
         self.api.set_cursor(*end)
         self.sleep(self.rng.uniform(0.2, 0.3))
         self.api.mouse_event(LEFTUP)
+
+    def click(self, x, y):
+        """A real click with the cursor, for screens that ignore the posted clicks (the fishing result)."""
+        self.focus()
+        origin = self.api.client_origin(self.hwnd)
+        size = self.api.client_size(self.hwnd)
+        self.api.set_cursor(*to_screen(origin, size, x, y))
+        self.sleep(self.rng.uniform(0.15, 0.3))
+        self.api.mouse_event(LEFTDOWN)
+        self.sleep(self.rng.uniform(0.06, 0.12))
+        self.api.mouse_event(LEFTUP)

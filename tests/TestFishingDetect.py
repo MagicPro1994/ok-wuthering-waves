@@ -95,9 +95,43 @@ class TestLandAvoidance(unittest.TestCase):
                 self.assertLess(detect.sector_danger(mask, bearing), 0.3, (name, bearing))
 
     def test_dock_is_dangerous_to_the_north_east(self):
+        # the pale pier is mostly left to the camera model; the dark structure beside it still counts
         mask = self.mask('mini_dock.png')
-        self.assertGreater(detect.sector_danger(mask, 45), 0.4)
+        self.assertGreater(max(detect.sector_danger(mask, b) for b in (45, 60, 75)), 0.25)
         self.assertLess(detect.sector_danger(mask, 200), 0.1)
+
+    def test_island_body_is_land_not_just_its_darkest_patches(self):
+        # live: the lighter grey-green island north-west of the boat was read as open water, so the route hugged it
+        mask = self.mask('mini_island.png')
+        self.assertGreater(detect.sector_danger(mask, 90), 0.6)
+        self.assertGreater(detect.sector_danger(mask, 120), 0.4)
+        self.assertGreater(detect.sector_danger(mask, 180), 0.3)      # the island's west coast, chest on it
+        for bearing in (240, 270, 300):
+            self.assertLess(detect.sector_danger(mask, bearing), 0.1, bearing)
+
+    def test_night_coast_is_land_in_and_out_of_the_cone(self):
+        # live at night land is only a little lighter than the water: a coast to the east and north-east, open sea west
+        mask = self.mask('mini_night_coast.png')
+        for bearing in (0, 30, 60, 90):
+            self.assertGreater(detect.sector_danger(mask, bearing), 0.3, bearing)
+        for bearing in (180, 210, 240, 270):
+            self.assertLess(detect.sector_danger(mask, bearing), 0.05, bearing)
+
+    def test_night_islet_to_the_south_and_coast_to_the_north(self):
+        mask = self.mask('mini_night_islet.png')
+        self.assertGreater(detect.sector_danger(mask, 270), 0.15)
+        for bearing in (150, 180, 210):
+            self.assertLess(detect.sector_danger(mask, bearing), 0.05, bearing)
+
+    def test_the_view_cone_over_open_water_is_not_land(self):
+        # the cone fades from the arrow to the rim; it must not be read as land at any radius
+        mask = self.mask('mini_west.png')
+        self.assertLess(mask.mean(), 0.01)
+
+    def test_the_edge_of_the_view_cone_is_not_land(self):
+        # the cone is a soft white blend; its far edge sits halfway between water and land in colour
+        mask = self.mask('mini_sea_day.png')
+        self.assertLess(mask.mean(), 0.01)
 
 
 class TestMinimap(unittest.TestCase):
@@ -124,6 +158,19 @@ class TestMinimap(unittest.TestCase):
 
     def test_no_target_gives_none(self):
         self.assertIsNone(detect.minimap_target_bearing(blank()))
+
+    def test_icon_is_found_over_bright_scenery(self):
+        # live: the minimap is translucent, over the lit dock the icon's purple is lighter than a fixed RGB
+        # window allows and the icon was reported lost, which opened the Set Time dial
+        img = frame_with_minimap('mini_dock_lit.png')
+        self.assertIsNotNone(detect.minimap_target_bearing(img))
+        self.assertLess(angle_gap(detect.minimap_target_bearing(img), 155), 15)   # up and to the left of the arrow
+        self.assertTrue(60 < detect.minimap_target_radius(img) < 90)
+
+    def test_a_few_stray_purple_pixels_are_not_an_icon(self):
+        img = blank()
+        img[100:102, 80:83] = (150, 60, 200)
+        self.assertIsNone(detect.minimap_target_bearing(img))
 
     def test_heading_error_sign_and_wrap(self):
         # positive: the target is anticlockwise of the heading, so turn left (A)

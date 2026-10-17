@@ -1111,14 +1111,16 @@ class TestEquipHover(unittest.TestCase):
 
 
 class Seller(BaitFishingTask):
-    """Plays the Dock Shop: `counts` are the successive hub cargo counts, `texts` what the shop screen shows."""
+    """Plays the Dock Shop: `cargo_view` and `catch_view` are the texts each view shows, `counts` the hub cargo counts."""
 
-    def __init__(self, counts, texts):
+    def __init__(self, cargo_view, catch_view, counts=(0,)):
+        self.views = {'cargo': set(cargo_view), 'catch': set(catch_view)}
+        self.view = 'cargo'
         self.counts = list(counts)
-        self.shown = set(texts)
         self.keys = []
         self.clicked_texts = []
         self.clicked = []
+        self.real = self
 
     def info_set(self, *a): pass
     def log_info(self, *a, **k): pass
@@ -1126,46 +1128,53 @@ class Seller(BaitFishingTask):
     def screenshot(self, *a, **k): pass
     def fail(self, message): raise Exception(message)
     def hub_cargo_used(self): return self.counts.pop(0)
-    def has_text(self, pattern, *box): return any(re.search(pattern, t, re.IGNORECASE) for t in self.shown)
+    def has_text(self, pattern, *box):
+        shown = self.views[self.view] | {'Fame', 'Dock Shop'}
+        return any(re.search(pattern, t, re.IGNORECASE) for t in shown)
     def click_at(self, x, y, **k): self.clicked.append((x, y))
-    def send_key(self, key, **k): self.keys.append(key)
+    def click(self, x, y): self.clicked.append((x, y))
     def wait_until(self, cond, time_out=10, **k): return cond()
 
+    def send_key(self, key, **k):
+        self.keys.append(key)
+        if key == 'c':
+            self.view = 'catch'
+
     def click_ocr_text(self, pattern, *a, **k):
-        for text in list(self.shown):
-            if text.lower() in pattern.lower().replace('\s*', ' ') or pattern.lower().replace('\s*', ' ') in text.lower():
-                self.clicked_texts.append(text)
+        for text in list(self.views[self.view]):
+            if text.lower() in pattern.lower().replace('\\s*', ' ') or pattern.lower().replace('\\s*', ' ') in text.lower():
+                self.clicked_texts.append((self.view, text))
                 if text == 'Confirm':
-                    self.shown.discard('Confirm')
+                    self.views[self.view].discard('Confirm')
                 return True
         return False
 
 
 class TestSellAll(unittest.TestCase):
-    def test_skips_an_empty_cargo(self):
-        task = Seller([0], [])
+    def test_sells_the_cargo_and_the_catch_list(self):
+        task = Seller(['Sell All'], ['Sell All'])
         task.sell_all()
-        self.assertEqual([], task.clicked)
-
-    def test_sells_and_checks_the_cargo(self):
-        task = Seller([20, 0], ['Sell All', 'Dock Shop'])
-        task.sell_all()
-        self.assertEqual(['Sell All'], task.clicked_texts)
-
-    def test_confirms_the_request_dialog_with_its_button(self):
-        task = Seller([20, 0], ['Sell All', 'Request items for sale', 'Dock Shop'])
-        task.sell_all()
-        self.assertIn(BaitFishingTask.REQUEST_CONFIRM_AT, task.clicked)
-        self.assertEqual(['Sell All'], task.clicked_texts)    # the "Confirm" title is never OCR-clicked
-
-    def test_opens_the_catch_list_when_the_shop_has_no_sell_all(self):
-        task = Seller([20, 0], ['Dock Shop'])
-        with self.assertRaises(Exception):
-            task.sell_all()
+        self.assertEqual([('cargo', 'Sell All'), ('catch', 'Sell All')], task.clicked_texts)
         self.assertIn('c', task.keys)
 
+    def test_an_empty_catch_list_is_left_alone(self):
+        task = Seller(['Sell All'], ['No Catch'])
+        task.sell_all()
+        self.assertEqual([('cargo', 'Sell All')], task.clicked_texts)
+
+    def test_the_catch_list_is_sold_even_when_the_cargo_is_empty(self):
+        task = Seller([], ['Sell All'])
+        task.sell_all()
+        self.assertEqual([('catch', 'Sell All')], task.clicked_texts)
+
+    def test_confirms_the_request_dialog_with_its_button(self):
+        task = Seller(['Sell All', 'Request items for sale'], ['No Catch'])
+        task.sell_all()
+        self.assertIn(BaitFishingTask.REQUEST_CONFIRM_AT, task.clicked)
+        self.assertEqual([('cargo', 'Sell All')], task.clicked_texts)    # the "Confirm" title is never OCR-clicked
+
     def test_fails_when_the_cargo_is_not_empty_afterwards(self):
-        task = Seller([20, 7], ['Sell All', 'Dock Shop'])
+        task = Seller(['Sell All'], ['No Catch'], counts=[7])
         with self.assertRaises(Exception):
             task.sell_all()
 

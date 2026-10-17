@@ -274,7 +274,9 @@ config = {
         ["src.task.FishingTask", "FishingTask"],
         ["src.task.BaitFishingTask", "BaitFishingTask"],
         ["src.task.CargoHelperTask", "CargoHelperTask"],
-        # ["src.task.DiagnosisTask", "DiagnosisTask"],
+        ["src.task.SailRecorderTask", "SailRecorderTask"],
+        ["src.task.SailTestTask", "SailTestTask"],
+        #["src.task.DiagnosisTask", "DiagnosisTask"],
     ], 'trigger_tasks': [
         ["src.task.AutoCombatTask", "AutoCombatTask"],
         ["src.task.AutoPickTask", "AutoPickTask"],

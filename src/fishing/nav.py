@@ -45,15 +45,15 @@ class Navigator:
     def mapping(self) -> Optional[Tuple[int, float]]:
         """(sign, offset) with world bearing = sign * minimap bearing + offset, or None before the boat has moved.
 
-        With one sample, or samples that disagree, it is a guess from the latest motion (not mirrored); that is
-        right for bearings near the heading, which is all a first bump needs.
+        With one sample, or samples that disagree, it is a guess from the latest motion, mirrored like the live
+        minimap; that is right for bearings near the heading, which is all a first bump needs.
         """
         if not self.samples:
             return None
         if len(self.samples) < 2:
             return self._latest_guess()
         best = None
-        for sign in (1, -1):
+        for sign in (-1, 1):                # the live minimap is mirrored (north-up, anticlockwise; world y is south)
             offsets = [(world - sign * heading) % 360 for heading, world in self.samples]
             offset = _circular_mean(offsets)
             spread = abs(sum(complex(math.cos(math.radians(o)), math.sin(math.radians(o))) for o in offsets)) / len(offsets)
@@ -63,10 +63,10 @@ class Navigator:
 
     def _latest_guess(self):
         heading, motion = self.samples[-1]
-        return 1, (motion - heading) % 360
+        return -1, (motion + heading) % 360
 
     def _mapping_or_identity(self):
-        return self.mapping() or (1, 0.0)
+        return self.mapping() or (-1, 0.0)
 
     def to_world(self, minimap_bearing: float) -> float:
         sign, offset = self._mapping_or_identity()
