@@ -24,7 +24,9 @@ class BaitFishingTask(FishingTask):
         self.description = ("Riccioli Islands: launch Sandworm bait near the dock, catch the fish, load the cargo, "
                             "sell all and repeat until the bait runs out. Start in the open world or on the boat near the dock. "
                             "Needs an elevated run.")
-        self.default_config.pop('Max Sail Minutes', None)
+        for key in ('Max Sail Minutes', 'Premium Request', 'Common Requests', 'Max Casts Per Request',
+                    'Skip Requests', 'Refresh Mutant Requests'):    # the daily request options
+            self.default_config.pop(key, None)
         self.default_config.update({'Max Rounds': 0})   # 0 = until the bait runs out
 
     def run(self):

@@ -1,6 +1,7 @@
 import re
 import types
 import unittest
+from unittest.mock import MagicMock
 
 import numpy as np
 
@@ -71,6 +72,16 @@ class TestRegistration(unittest.TestCase):
     def test_registered_in_config(self):
         from config import config
         self.assertIn(["src.task.BaitFishingTask", "BaitFishingTask"], config["onetime_tasks"])
+
+    def test_options_are_not_the_daily_fishing_ones(self):
+        try:
+            task = BaitFishingTask(MagicMock(), MagicMock())
+        except Exception as e:
+            self.skipTest(f'the task needs the framework to be built: {e}')
+        for key in ('Max Sail Minutes', 'Premium Request', 'Common Requests', 'Max Casts Per Request',
+                    'Skip Requests', 'Refresh Mutant Requests'):
+            self.assertNotIn(key, task.default_config)
+        self.assertEqual(task.default_config['Max Rounds'], 0)
 
     def test_tool_key_check_is_inherited(self):
         task = BaitFishingTask.__new__(BaitFishingTask)
