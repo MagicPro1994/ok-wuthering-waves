@@ -179,11 +179,12 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
                             "Start in the open world or on the boat. Needs an elevated run.")
         self.default_config.update({'Max Sail Minutes': 25, 'Premium Request': True, 'Common Requests': 4,
                                     'Max Casts Per Request': 12,
-                                    'Skip Requests': 'Coconut', 'Skip Mutant Requests': False})
+                                    'Skip Requests': 'Coconut', 'Refresh Mutant Requests': False})
         self.real = None
         self.expected_objectives = 1    # how many objective lines the tracked request has
         self.objective_names = []       # the objectives of the tracked request, as the request screen named them
         self.given_up = 0               # requests abandoned after too many casts without finishing them
+        self.refreshes = 0              # Mutant requests replaced with the Refresh button this run
         self.cargo_full = False         # request fish that did not fit in the cargo
         self.shape_line = {}            # fish shape -> the objective line it counts for, learnt while loading
         self.avoid_side = random.choice([-1, 1])
@@ -203,6 +204,7 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
         self.check_tool_key()
         self.real = RealInput(self.hwnd.hwnd)
         self.given_up = 0           # a fresh run passes over nothing
+        self.refreshes = 0
         self.cargo_full = False
         finished = 0
         if self.resumable_at_sea():
@@ -426,8 +428,7 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
         if not self.click_ocr_text('Fishing Request', 0.0, 0.1, 0.5, 0.4):
             self.click_at(*self.REQUEST_MORE)
         self.sleep(1.2)
-        boxes = [(box.name, (box.y + box.height / 2) * 1080 / self.height)
-                 for box in (self.ocr(*self.REQUEST_LIST) or [])]
+        boxes = self.request_boxes()
         while True:
             entry_y = premium_entry(boxes) if kind == 'premium' else common_entry(boxes, self.given_up, self.avoided_requests())
             if entry_y is None:
@@ -439,10 +440,15 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
             self.objective_names = sorted(shown or [])
             self.expected_objectives = len(detect.progress_pairs(self.texts(*self.OBJECTIVES_BOX))) or 1
             self.shape_line = {}
-            if (kind == 'common' and self.config.get('Skip Mutant Requests', False)
+            if (kind == 'common' and self.config.get('Refresh Mutant Requests', False)
                     and any('mutant' in name for name in self.objective_names)
                     and track_action(self.texts(*self.TRACK_BUTTON)) != 'deliver'):
-                self.log_info(f'skipping a Mutant request ({self.objective_names})')
+                if self.refreshes < self.MAX_REFRESHES and self.refresh_request():
+                    self.refreshes += 1
+                    self.log_info(f'refreshed a Mutant request ({self.objective_names})', notify=True)
+                    boxes = self.request_boxes()
+                    continue
+                self.log_info(f'could not refresh a Mutant request ({self.objective_names}): passing it over')
                 self.given_up += 1                          # passed over, like one given up on
                 continue
             break
@@ -462,6 +468,25 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
         if track_action(self.texts(*self.TRACK_BUTTON)) == 'tracking':
             self.send_key('esc', after_sleep=1.2)     # still on the request screen: back to the dock hub
         return 'fish'
+
+    MAX_REFRESHES = 6               # each refresh costs currency: never more than this in one run
+
+    def request_boxes(self):
+        """OCR (text, y centre in 1080p) pairs of the Fishing Request list."""
+        return [(box.name, (box.y + box.height / 2) * 1080 / self.height)
+                for box in (self.ocr(*self.REQUEST_LIST) or [])]
+
+    def refresh_request(self):
+        """Press "Refresh with <cost>" on the selected request so it gets replaced by a new one. False when the
+        button is not there (no refresh left or not affordable)."""
+        if not self.click_ocr_text(r'Refresh\s*with'):
+            return False
+        self.sleep(1.2)
+        if self.has_text(r'Confirm|Notice|Tips'):           # a purchase dialog, if the game asks first
+            self.click_at(*self.REQUEST_CONFIRM_AT, after_sleep=1.5)
+        self.screenshot('refresh_request')
+        self.sleep(1.5)
+        return True
 
     def avoided_requests(self):
         """Title patterns of the requests that are never taken (config 'Skip Requests', comma separated)."""
