@@ -228,7 +228,7 @@ class CombatCheck(BaseWWTask):
         old = win32api.GetCursorPos()
         self.move(levitator.x, levitator.y)
         abs_pos = self.executor.interaction.capture.get_abs_cords(levitator.x, levitator.y)
-        win32api.SetCursorPos(abs_pos)
+        self.set_cursor(*abs_pos)
         self.sleep(0.1)
         self.send_key_up(self.key_config.get('Wheel Key'))
         self.sleep(0.2)

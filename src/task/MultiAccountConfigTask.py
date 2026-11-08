@@ -47,6 +47,12 @@ class MultiAccountConfigTask(MultiAccountDailyTask):
             self.sleep(0.2)
         return super().click(x, y, *args, **kwargs)
 
+    @property
+    def humanize_input(self):
+        # This task only drives the launcher's login windows, which need exact clicks.
+        # The game tasks it starts humanize their own input.
+        return False
+
     def run(self):
         store = MultiAccountConfigStore(self.executor.config_folder)
         accounts = store.load()

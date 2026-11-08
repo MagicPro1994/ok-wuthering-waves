@@ -5,7 +5,6 @@ import time
 
 import cv2
 import numpy as np
-import win32api
 from ok import Logger
 
 from src.fishing import bait_ui as ui, cargo_grid as cg, detect, escape, human_input as hi
@@ -939,7 +938,7 @@ class FishingTask(WWOneTimeTask, BaseWWTask):
         px, py = int(x * self.width), int(y * self.height)
         self.move(px, py)
         abs_x, abs_y = self.executor.interaction.capture.get_abs_cords(px, py)
-        win32api.SetCursorPos((int(abs_x), int(abs_y)))
+        self.set_cursor(abs_x, abs_y)
 
     def equip(self, name):
         for _ in range(3):

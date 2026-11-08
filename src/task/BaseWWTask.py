@@ -10,6 +10,7 @@ from ok import BaseTask, Logger, find_boxes_by_name, og, find_color_rectangles, 
 from ok import CannotFindException
 import cv2
 
+from src import humanize
 from src.Labels import Labels
 from src.scene.WWScene import WWScene
 
@@ -344,8 +345,16 @@ class BaseWWTask(BaseTask):
                              threshold=0.8,
                              target_height=720)
 
+    @property
+    def humanize_input(self):
+        try:
+            config = self.get_global_config('Human-like Input')
+        except Exception:
+            return True
+        return bool(config.get('Enabled', True)) if config is not None else True
+
     def click(self, x=-1, y=-1, move_back=False, name=None, interval=-1, move=False, down_time=0.01, after_sleep=0,
-              key="left"):
+              key="left", scatter=True):
         if x == -1 and y == -1:
             x = self.width_of_screen(0.5)
             y = self.height_of_screen(0.5)
@@ -353,8 +362,46 @@ class BaseWWTask(BaseTask):
             down_time = 0.01
         else:
             down_time = 0.2
+        if self.humanize_input:
+            down_time = humanize.hold_time(down_time)
+            # Boxes and 0-1 relative coords come back here as pixels, so only scatter pixels.
+            if scatter and isinstance(x, (int, float)) and isinstance(y, (int, float)) and x >= 1 and y >= 1:
+                x, y = humanize.point_near(x, y, self.height)
         return super().click(x, y, move_back, name, interval, move=move, down_time=down_time, after_sleep=after_sleep,
                              key=key)
+
+    def click_box(self, box=None, relative_x=0.5, relative_y=0.5, raise_if_not_found=False,
+                  move_back=False, move=True, down_time=0.01, after_sleep=1):
+        if not self.humanize_input:
+            return super().click_box(box, relative_x, relative_y, raise_if_not_found, move_back, move, down_time,
+                                     after_sleep)
+        if isinstance(box, list):
+            box = box[0] if box else None
+        if isinstance(box, str):
+            box = self.get_box_by_name(box)
+        if not box:
+            return super().click_box(box, relative_x, relative_y, raise_if_not_found, move_back, move, down_time,
+                                     after_sleep)
+        # The framework's own box "variance" is under 0.1 px, so it always hits the same pixel.
+        x, y = humanize.point_in_box(box.x, box.y, box.width, box.height, relative_x, relative_y)
+        time.sleep(humanize.reaction_delay())
+        return self.click(x, y, name=box.name, move_back=move_back, move=move, down_time=down_time,
+                          after_sleep=after_sleep, scatter=False)
+
+    def send_key(self, key, down_time=0.02, interval=-1, after_sleep=0):
+        if self.humanize_input:
+            down_time = humanize.hold_time(down_time)
+        return super().send_key(key, down_time=down_time, interval=interval, after_sleep=after_sleep)
+
+    def set_cursor(self, abs_x, abs_y):
+        """Move the real cursor; glides there instead of jumping when input is humanized."""
+        import win32api
+        if not self.humanize_input:
+            win32api.SetCursorPos((int(abs_x), int(abs_y)))
+            return
+        for x, y, delay in humanize.glide_path(win32api.GetCursorPos(), (abs_x, abs_y)):
+            win32api.SetCursorPos((x, y))
+            time.sleep(delay)
 
     def check_for_monthly_card(self):
         if self.should_check_monthly_card():
@@ -673,6 +720,8 @@ class BaseWWTask(BaseTask):
         return False
 
     def sleep(self, timeout):
+        if self.humanize_input:
+            timeout = humanize.sleep_time(timeout)
         return super().sleep(timeout - self.check_for_monthly_card())
 
     def wait_in_team_and_world(self, time_out=10, raise_if_not_found=True, esc=False):

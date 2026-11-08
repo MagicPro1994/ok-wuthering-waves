@@ -156,6 +156,12 @@ monthly_card_config_option = ConfigOption('Monthly Card Config', {
     'Monthly Card Time': 'Your computer\'s local time when the monthly card will popup, hour in (1-24)'
 })
 
+human_input_config_option = ConfigOption('Human-like Input', {
+    'Enabled': True,
+}, description='Vary click spots, hold times and pauses so input looks less scripted', config_description={
+    'Enabled': 'Randomize click positions, key/click hold times and wait times. Tasks run slightly slower.',
+})
+
 config = {
     'debug': False,  # Optional, default: False
     'custom_tasks': True,
@@ -178,7 +184,8 @@ config = {
     'config_folder': 'configs',
     'blur_area': blur_area,
     'gui_icon': 'icons/icon.png',
-    'global_configs': [basic_config_option, key_config_option, char_config_option, monthly_card_config_option],
+    'global_configs': [basic_config_option, key_config_option, char_config_option, monthly_card_config_option,
+                       human_input_config_option],
     'ocr': {
         'lib': 'onnxocr',
         'auto_simplify': True,
